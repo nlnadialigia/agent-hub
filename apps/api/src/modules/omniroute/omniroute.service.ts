@@ -33,32 +33,73 @@ export class OmniRouteService {
   ) {}
 
   /**
+   * Resolve a URL acessível do OmniRoute testando interna (omniroute:20128) e externa (localhost:20128)
+   */
+  async resolveWorkingBaseUrl(): Promise<string> {
+    const omniConfig = await this.vaultService.getEffectiveConfig('OMNIROUTE');
+    const candidates = [
+      process.env.OMNIROUTE_BASE_URL,
+      omniConfig.baseUrl,
+      'http://omniroute:20128/v1',
+      'http://localhost:20128/v1',
+    ].filter(Boolean) as string[];
+
+    const uniqueCandidates = Array.from(new Set(candidates));
+
+    for (const url of uniqueCandidates) {
+      try {
+        await axios.get(`${url}/models`, {
+          headers: { Authorization: `Bearer ${omniConfig.apiKey || 'sk-omniroute-local'}` },
+          timeout: 2500,
+        });
+        return url;
+      } catch {
+        // Tenta o próximo
+      }
+    }
+
+    return uniqueCandidates[0] || 'http://omniroute:20128/v1';
+  }
+
+  /**
    * Verifica o status de saúde do OmniRoute Gateway
    */
   async checkHealth(): Promise<{ status: 'online' | 'offline'; baseUrl: string; message: string }> {
     const omniConfig = await this.vaultService.getEffectiveConfig('OMNIROUTE');
-    const baseUrl = omniConfig.baseUrl || process.env.OMNIROUTE_BASE_URL || 'http://localhost:20128/v1';
+    const candidates = [
+      process.env.OMNIROUTE_BASE_URL,
+      omniConfig.baseUrl,
+      'http://omniroute:20128/v1',
+      'http://localhost:20128/v1',
+    ].filter(Boolean) as string[];
 
-    try {
-      const response = await axios.get(`${baseUrl}/models`, {
-        headers: {
-          Authorization: `Bearer ${omniConfig.apiKey || 'sk-omniroute-local'}`,
-        },
-        timeout: 4000,
-      });
+    const uniqueCandidates = Array.from(new Set(candidates));
 
-      return {
-        status: 'online',
-        baseUrl,
-        message: `OmniRoute ativo com ${response.data?.data?.length || 0} modelos detectados.`,
-      };
-    } catch (error: any) {
-      return {
-        status: 'offline',
-        baseUrl,
-        message: `OmniRoute indisponível em ${baseUrl}: ${error.message}`,
-      };
+    for (const baseUrl of uniqueCandidates) {
+      try {
+        const response = await axios.get(`${baseUrl}/models`, {
+          headers: {
+            Authorization: `Bearer ${omniConfig.apiKey || 'sk-omniroute-local'}`,
+          },
+          timeout: 3000,
+        });
+
+        return {
+          status: 'online',
+          baseUrl,
+          message: `OmniRoute ativo com ${response.data?.data?.length || 0} modelos detectados.`,
+        };
+      } catch {
+        // Tenta próxima URL candidata
+      }
     }
+
+    const failedUrl = uniqueCandidates[0] || 'http://omniroute:20128/v1';
+    return {
+      status: 'offline',
+      baseUrl: failedUrl,
+      message: `OmniRoute indisponível em ${failedUrl}. Verifique o container 'agent_hub_omniroute'.`,
+    };
   }
 
   /**
@@ -76,7 +117,7 @@ export class OmniRouteService {
    */
   async syncFreeModelsFromOmniRoute(): Promise<{ added: number; total: number }> {
     const omniConfig = await this.vaultService.getEffectiveConfig('OMNIROUTE');
-    const baseUrl = omniConfig.baseUrl || 'http://localhost:20128/v1';
+    const baseUrl = await this.resolveWorkingBaseUrl();
 
     try {
       const response = await axios.get(`${baseUrl}/models`, {
@@ -191,7 +232,7 @@ export class OmniRouteService {
     }
 
     // Tenta via OmniRoute Gateway
-    const omniBaseUrl = omniConfig.baseUrl || 'http://localhost:20128/v1';
+    const omniBaseUrl = await this.resolveWorkingBaseUrl();
     const omniApiKey = omniConfig.apiKey || 'sk-omniroute-local';
 
     try {

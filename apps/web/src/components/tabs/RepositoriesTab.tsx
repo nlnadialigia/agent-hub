@@ -9,6 +9,8 @@ import {
   Server,
   Layers,
   FileCheck,
+  FolderOpen,
+  FolderSearch,
 } from 'lucide-react';
 import { AgentHubApi } from '../../services/api';
 import { Button } from '../ui/button';
@@ -19,8 +21,10 @@ export const RepositoriesTab: React.FC = () => {
   const [repositories, setRepositories] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showScanForm, setShowScanForm] = useState(false);
+  const [showBatchForm, setShowBatchForm] = useState(false);
   const [scanPath, setScanPath] = useState('');
   const [scanName, setScanName] = useState('');
+  const [batchPath, setBatchPath] = useState('/home/nlnadialigia');
   const [savedTargetBranchId, setSavedTargetBranchId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,6 +56,23 @@ export const RepositoriesTab: React.FC = () => {
       await loadRepositories();
     } catch (err: any) {
       alert(`Erro ao escanear repositório: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBatchScanSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!batchPath.trim()) return;
+
+    setLoading(true);
+    try {
+      const res = await AgentHubApi.scanDirectory(batchPath.trim());
+      alert(`Varredura concluída! ${res.scannedCount} repositório(s) descobertos e importados da pasta.`);
+      setShowBatchForm(false);
+      await loadRepositories();
+    } catch (err: any) {
+      alert(`Erro ao escanear pasta de repositórios: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -92,14 +113,73 @@ export const RepositoriesTab: React.FC = () => {
             Atualizar
           </Button>
 
-          <Button variant="cyan" size="sm" onClick={() => setShowScanForm(!showScanForm)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setShowBatchForm(!showBatchForm);
+              setShowScanForm(false);
+            }}
+            className="border-cyan-500/40 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/40"
+          >
+            <FolderOpen className="w-4 h-4 mr-1.5 text-cyan-500" />
+            Escanear Pasta (Lote)
+          </Button>
+
+          <Button
+            variant="cyan"
+            size="sm"
+            onClick={() => {
+              setShowScanForm(!showScanForm);
+              setShowBatchForm(false);
+            }}
+          >
             <Plus className="w-4 h-4 mr-1.5" />
             Escanear Repositório
           </Button>
         </div>
       </div>
 
-      {/* Formulário de Escaneamento */}
+      {/* Formulário de Escaneamento em Lote */}
+      {showBatchForm && (
+        <Card className="border-cyan-500/40 bg-cyan-50/10 dark:bg-cyan-950/20 shadow-md">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base text-cyan-700 dark:text-cyan-300 flex items-center space-x-2">
+              <FolderSearch className="w-5 h-5 text-cyan-500" />
+              <span>Escanear Pasta Completa & Importar Múltiplos Repositórios</span>
+            </CardTitle>
+            <CardDescription>
+              Informe um diretório pai (ex: <code>/home/nlnadialigia</code> ou <code>/home/nlnadialigia/projetos</code>). O sistema varrerá as subpastas e importará todos os projetos com Git automaticamente.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleBatchScanSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-500">Caminho da Pasta Pai no Host</label>
+                <input
+                  type="text"
+                  required
+                  value={batchPath}
+                  onChange={(e) => setBatchPath(e.target.value)}
+                  placeholder="Ex: /home/nlnadialigia"
+                  className="w-full px-3.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowBatchForm(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" variant="cyan" size="sm" disabled={loading || !batchPath.trim()}>
+                  {loading ? 'Varrendo Subpastas...' : 'Iniciar Varredura em Lote'}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Formulário de Escaneamento Individual */}
       {showScanForm && (
         <Card className="border-cyan-500/40 shadow-md">
           <CardHeader className="pb-3">
