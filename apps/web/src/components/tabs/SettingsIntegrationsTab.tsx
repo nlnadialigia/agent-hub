@@ -93,6 +93,35 @@ export const SettingsIntegrationsTab: React.FC = () => {
         <Badge variant="cyan">Segurança AES-256-GCM</Badge>
       </div>
 
+      {/* BLOCO 0: Caminho dos Repositórios no Host */}
+      <Card className="border-cyan-500/30 bg-cyan-50/10 dark:bg-cyan-950/20">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base text-cyan-600 dark:text-cyan-400 flex items-center space-x-2">
+              <span>📁 Acesso do Docker aos Repositórios do Host</span>
+            </CardTitle>
+            <Badge variant="cyan">Volume Mapeado</Badge>
+          </div>
+          <CardDescription className="text-xs">
+            O diretório abaixo é montado de forma transparente no container Docker, permitindo que você aponte qualquer repositório do seu computador sem erros de caminho.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs text-slate-500">Caminho Base no seu Computador (HOST_REPOS_PATH)</label>
+            <input
+              type="text"
+              readOnly
+              value="/home/nlnadialigia"
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-mono text-slate-700 dark:text-slate-300 select-all"
+            />
+          </div>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            💡 <strong>Dica:</strong> Qualquer pasta dentro de <code>/home/nlnadialigia/...</code> (ex: <code>/home/nlnadialigia/suzano</code>) é acessível diretamente pelo scanner e pelo executor de Git Worktree da Squad.
+          </p>
+        </CardContent>
+      </Card>
+
       {/* BLOCO 1: Conexões de Boards (Task Providers) */}
       <div className="space-y-4">
         <h3 className="text-base font-bold text-slate-800 dark:text-slate-200 flex items-center space-x-2">

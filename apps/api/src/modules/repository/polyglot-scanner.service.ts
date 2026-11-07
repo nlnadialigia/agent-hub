@@ -39,12 +39,22 @@ export class PolyglotScannerService {
    * Escaneia e constrói o perfil poliglota completo de um repositório
    */
   async scanRepository(repoPath: string, repoName?: string, forceScan = false): Promise<PolyglotProfileResult> {
-    const resolvedPath = path.resolve(repoPath);
-    const inferredName = repoName || path.basename(resolvedPath);
+    let resolvedPath = path.resolve(repoPath);
 
     if (!(await fs.pathExists(resolvedPath))) {
-      throw new Error(`Diretório do repositório não encontrado: ${resolvedPath}`);
+      // Tenta caminhos alternativos montados no container
+      const inRepos = path.join('/workspace/repos', repoPath);
+      const inHome = path.join('/home/nlnadialigia', repoPath);
+      if (await fs.pathExists(inRepos)) {
+        resolvedPath = inRepos;
+      } else if (await fs.pathExists(inHome)) {
+        resolvedPath = inHome;
+      } else {
+        throw new Error(`Diretório do repositório não encontrado: ${resolvedPath}`);
+      }
     }
+
+    const inferredName = repoName || path.basename(resolvedPath);
 
     // 1. Obter hash atual do commit e URL remota via Git
     let currentCommit = 'unknown';
@@ -322,5 +332,49 @@ export class PolyglotScannerService {
       where: { id },
       data: { targetBranch },
     });
+  }
+
+  /**
+   * Escaneia uma pasta pai e descobre automaticamente todos os repositórios Git existentes nela
+   */
+  async scanDirectory(parentPath: string): Promise<{ parentPath: string; scannedCount: number; repositories: PolyglotProfileResult[] }> {
+    let resolvedParent = path.resolve(parentPath);
+    if (!(await fs.pathExists(resolvedParent))) {
+      const inRepos = path.join('/workspace/repos', parentPath);
+      const inHome = path.join('/home/nlnadialigia', parentPath);
+      if (await fs.pathExists(inRepos)) resolvedParent = inRepos;
+      else if (await fs.pathExists(inHome)) resolvedParent = inHome;
+      else throw new Error(`Diretório pai não encontrado: ${resolvedParent}`);
+    }
+
+    this.logger.log(`📂 [Batch Scanner] Buscando repositórios dentro de '${resolvedParent}'...`);
+    const entries = await fs.readdir(resolvedParent, { withFileTypes: true });
+    const scannedRepos: PolyglotProfileResult[] = [];
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const fullSubPath = path.join(resolvedParent, entry.name);
+        const hasGit = await fs.pathExists(path.join(fullSubPath, '.git'));
+        const hasManifest =
+          (await fs.pathExists(path.join(fullSubPath, 'package.json'))) ||
+          (await fs.pathExists(path.join(fullSubPath, 'pyproject.toml')));
+
+        if (hasGit || hasManifest) {
+          try {
+            this.logger.log(`🔍 [Batch Scanner] Encontrado repositório em '${entry.name}'. Escaneando...`);
+            const result = await this.scanRepository(fullSubPath, entry.name, true);
+            scannedRepos.push(result);
+          } catch (err: any) {
+            this.logger.warn(`Erro ao escanear subpasta '${entry.name}': ${err.message}`);
+          }
+        }
+      }
+    }
+
+    return {
+      parentPath: resolvedParent,
+      scannedCount: scannedRepos.length,
+      repositories: scannedRepos,
+    };
   }
 }

@@ -9,6 +9,10 @@ import {
   Sparkles,
   Server,
   Zap,
+  BadgeCheck,
+  CreditCard,
+  DollarSign,
+  Tag,
 } from 'lucide-react';
 import { AgentHubApi } from '../../services/api';
 import { Button } from '../ui/button';
@@ -98,9 +102,17 @@ export const SquadOmniRouteTab: React.FC = () => {
                     {omniHealth.status === 'online' ? 'OmniRoute Online :20128' : 'OmniRoute Offline'}
                   </span>
                 </div>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                  Catálogo Controlado: <strong>{freeCount} Free</strong> / <strong>{paidCount} Pago (Gemini 2.5 Pro)</strong>. Especialistas rodam 100% grátis.
-                </p>
+                <div className="flex items-center space-x-2 mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  <span>Catálogo de Modelos:</span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                    <BadgeCheck className="w-3.5 h-3.5 mr-1 text-emerald-500" />
+                    {freeCount} Verificados Gratuitos
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800">
+                    <CreditCard className="w-3.5 h-3.5 mr-1 text-cyan-500" />
+                    {paidCount} Pro / Pago
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -133,9 +145,15 @@ export const SquadOmniRouteTab: React.FC = () => {
                   </CardDescription>
                 </div>
                 {agent.role === 'ORCHESTRATOR' ? (
-                  <Badge variant="cyan">💳 Pago Default</Badge>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-cyan-100 text-cyan-800 dark:bg-cyan-950/70 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800 shadow-sm">
+                    <CreditCard className="w-3.5 h-3.5 mr-1 text-cyan-600 dark:text-cyan-400" />
+                    Pro / Pago
+                  </span>
                 ) : (
-                  <Badge variant="success">🟢 100% Free</Badge>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-sm">
+                    <BadgeCheck className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" />
+                    Gratuito
+                  </span>
                 )}
               </div>
             </CardHeader>

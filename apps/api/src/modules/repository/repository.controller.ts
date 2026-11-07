@@ -22,6 +22,16 @@ export class RepositoryController {
     return this.scannerService.scanRepository(body.path, body.name, body.forceScan);
   }
 
+  @Post('scan-directory')
+  async scanDirectory(
+    @Body()
+    body: {
+      directoryPath: string;
+    }
+  ) {
+    return this.scannerService.scanDirectory(body.directoryPath);
+  }
+
   @Patch(':id/target-branch')
   async updateTargetBranch(
     @Param('id') id: string,

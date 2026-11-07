@@ -17,6 +17,10 @@ export const AgentHubApi = {
     const res = await api.post('/repositories/scan', { path, name, forceScan });
     return res.data;
   },
+  scanDirectory: async (directoryPath: string) => {
+    const res = await api.post('/repositories/scan-directory', { directoryPath });
+    return res.data;
+  },
   updateTargetBranch: async (id: string, targetBranch: string) => {
     const res = await api.patch(`/repositories/${id}/target-branch`, { targetBranch });
     return res.data;
