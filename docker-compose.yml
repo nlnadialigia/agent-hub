@@ -25,6 +25,9 @@ services:
     restart: unless-stopped
     ports:
       - "20128:20128"
+    environment:
+      ROUTER_API_KEY: ${OMNIROUTE_API_KEY:-sk-omniroute-local}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-sk-omniroute-local}
     volumes:
       - agent_hub_omniroute_data:/app/data
     networks:
@@ -48,7 +51,7 @@ services:
       PORT: 3333
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-agent_hub_db}?schema=public
       VAULT_SECRET_KEY: ${VAULT_SECRET_KEY:-agent_hub_super_secret_vault_key_2026_32bytes!}
-      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://omniroute:20128/v1}
+      OMNIROUTE_BASE_URL: http://omniroute:20128/v1
       OMNIROUTE_PUBLIC_URL: http://localhost:20128
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-sk-omniroute-local}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -70,6 +73,7 @@ services:
       BITBUCKET_TOKEN: ${BITBUCKET_TOKEN:-}
       REPOS_BASE_DIR: /workspace/repos
       WORKTREES_BASE_DIR: /workspace/worktrees
+      HOST_REPOS_PATH: ${HOST_REPOS_PATH:-/home/nlnadialigia}
     volumes:
       - ${HOST_REPOS_PATH:-/home/nlnadialigia}:/home/nlnadialigia
       - ${HOST_REPOS_PATH:-/home/nlnadialigia}:/workspace/repos

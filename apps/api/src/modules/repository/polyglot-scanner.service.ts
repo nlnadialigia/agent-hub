@@ -36,23 +36,83 @@ export class PolyglotScannerService {
   ) {}
 
   /**
+   * Resolve um caminho de repositório ou pasta pai (seja caminho absoluto do host,
+   * relativo ou interno do container) para o caminho montado correspondente dentro do container Docker.
+   */
+  async resolvePath(targetPath: string): Promise<string> {
+    const raw = targetPath.trim();
+    const reposBase = process.env.REPOS_BASE_DIR || '/workspace/repos';
+    const hostReposPath = process.env.HOST_REPOS_PATH?.trim();
+
+    const candidates: string[] = [];
+
+    // 1. Expandir ~ para a home padrão do usuário no host caso seja fornecido
+    const expanded = raw.startsWith('~')
+      ? raw.replace(/^~/, '/home/nlnadialigia')
+      : raw;
+
+    // 2. Se HOST_REPOS_PATH estiver configurado (ex: /home/nlnadialigia/suzano)
+    if (hostReposPath) {
+      const cleanHost = path.resolve(hostReposPath);
+      const cleanTarget = path.resolve(expanded);
+
+      if (cleanTarget === cleanHost) {
+        // O usuário apontou exatamente para o diretório raiz do host montado
+        candidates.push(reposBase);
+        candidates.push('/home/nlnadialigia');
+      } else if (cleanTarget.startsWith(cleanHost + path.sep)) {
+        // O usuário apontou para um subdiretório dentro do HOST_REPOS_PATH
+        const sub = path.relative(cleanHost, cleanTarget);
+        candidates.push(path.join(reposBase, sub));
+        candidates.push(path.join('/home/nlnadialigia', sub));
+      }
+    }
+
+    // 3. Heurística inteligente caso HOST_REPOS_PATH ainda não esteja propagado no container:
+    // Se o usuário passou /home/nlnadialigia/<pasta_raiz_montada>[/<subpasta>]
+    if (expanded.startsWith('/home/nlnadialigia/')) {
+      const afterHome = expanded.substring('/home/nlnadialigia/'.length);
+      const segments = afterHome.split(path.sep).filter(Boolean);
+
+      if (segments.length === 1) {
+        // Ex: /home/nlnadialigia/suzano -> o próprio reposBase
+        candidates.push(reposBase);
+        candidates.push('/home/nlnadialigia');
+      } else if (segments.length > 1) {
+        // Ex: /home/nlnadialigia/suzano/portal-florestal-backend -> subpasta dentro do reposBase
+        const sub = segments.slice(1).join(path.sep);
+        candidates.push(path.join(reposBase, sub));
+        candidates.push(path.join('/home/nlnadialigia', sub));
+      }
+    }
+
+    // 4. Testar o caminho diretamente (caso já seja um caminho absoluto válido do container)
+    candidates.push(path.resolve(expanded));
+
+    // 5. Testar relativo ao reposBase e /home/nlnadialigia
+    const strippedLeadingSlash = expanded.replace(/^\/+/, '');
+    candidates.push(path.join(reposBase, expanded));
+    candidates.push(path.join(reposBase, strippedLeadingSlash));
+    candidates.push(path.join('/home/nlnadialigia', strippedLeadingSlash));
+
+    // 6. Percorrer os candidatos e retornar o primeiro que existir no filesystem
+    for (const candidate of candidates) {
+      if (await fs.pathExists(candidate)) {
+        this.logger.log(`📍 [Path Resolver] '${raw}' resolvido com sucesso para '${candidate}'`);
+        return candidate;
+      }
+    }
+
+    throw new Error(
+      `Diretório não encontrado: ${raw}. Caminhos verificados no container: ${Array.from(new Set(candidates)).join(', ')}`
+    );
+  }
+
+  /**
    * Escaneia e constrói o perfil poliglota completo de um repositório
    */
   async scanRepository(repoPath: string, repoName?: string, forceScan = false): Promise<PolyglotProfileResult> {
-    let resolvedPath = path.resolve(repoPath);
-
-    if (!(await fs.pathExists(resolvedPath))) {
-      // Tenta caminhos alternativos montados no container
-      const inRepos = path.join('/workspace/repos', repoPath);
-      const inHome = path.join('/home/nlnadialigia', repoPath);
-      if (await fs.pathExists(inRepos)) {
-        resolvedPath = inRepos;
-      } else if (await fs.pathExists(inHome)) {
-        resolvedPath = inHome;
-      } else {
-        throw new Error(`Diretório do repositório não encontrado: ${resolvedPath}`);
-      }
-    }
+    const resolvedPath = await this.resolvePath(repoPath);
 
     const inferredName = repoName || path.basename(resolvedPath);
 
@@ -338,14 +398,7 @@ export class PolyglotScannerService {
    * Escaneia uma pasta pai e descobre automaticamente todos os repositórios Git existentes nela
    */
   async scanDirectory(parentPath: string): Promise<{ parentPath: string; scannedCount: number; repositories: PolyglotProfileResult[] }> {
-    let resolvedParent = path.resolve(parentPath);
-    if (!(await fs.pathExists(resolvedParent))) {
-      const inRepos = path.join('/workspace/repos', parentPath);
-      const inHome = path.join('/home/nlnadialigia', parentPath);
-      if (await fs.pathExists(inRepos)) resolvedParent = inRepos;
-      else if (await fs.pathExists(inHome)) resolvedParent = inHome;
-      else throw new Error(`Diretório pai não encontrado: ${resolvedParent}`);
-    }
+    const resolvedParent = await this.resolvePath(parentPath);
 
     this.logger.log(`📂 [Batch Scanner] Buscando repositórios dentro de '${resolvedParent}'...`);
     const entries = await fs.readdir(resolvedParent, { withFileTypes: true });

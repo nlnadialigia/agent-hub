@@ -1,28 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import { BadgeCheck, Check, Cpu, CreditCard, RefreshCw } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { AgentHubApi } from "../../services/api";
+import { Button } from "../ui/button";
 import {
-  Bot,
-  RefreshCw,
-  Cpu,
-  Sliders,
-  ShieldCheck,
-  Check,
-  Sparkles,
-  Server,
-  Zap,
-  BadgeCheck,
-  CreditCard,
-  DollarSign,
-  Tag,
-} from 'lucide-react';
-import { AgentHubApi } from '../../services/api';
-import { Button } from '../ui/button';
-import { Badge } from '../ui/badge';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui/card';
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../ui/card";
 
 export const SquadOmniRouteTab: React.FC = () => {
   const [specialists, setSpecialists] = useState<any[]>([]);
   const [allowedModels, setAllowedModels] = useState<any[]>([]);
-  const [omniHealth, setOmniHealth] = useState<any>({ status: 'checking', baseUrl: 'http://localhost:20128/v1' });
+  const [omniHealth, setOmniHealth] = useState<any>({
+    status: "checking",
+    baseUrl: "http://localhost:20128/v1",
+  });
   const [syncing, setSyncing] = useState(false);
   const [savedRole, setSavedRole] = useState<string | null>(null);
 
@@ -49,7 +43,9 @@ export const SquadOmniRouteTab: React.FC = () => {
     setSyncing(true);
     try {
       const res = await AgentHubApi.syncFreeModels();
-      alert(`Sincronização concluída! ${res.added} novos modelos gratuitos adicionados ao catálogo.`);
+      alert(
+        `Sincronização concluída! ${res.added} novos modelos gratuitos adicionados ao catálogo.`,
+      );
       await loadData();
     } catch (err: any) {
       alert(`Falha na sincronização: ${err.message}`);
@@ -69,8 +65,8 @@ export const SquadOmniRouteTab: React.FC = () => {
     }
   };
 
-  const freeCount = allowedModels.filter((m) => m.costTier === 'FREE').length;
-  const paidCount = allowedModels.filter((m) => m.costTier === 'PAID').length;
+  const freeCount = allowedModels.filter((m) => m.costTier === "FREE").length;
+  const paidCount = allowedModels.filter((m) => m.costTier === "PAID").length;
 
   return (
     <div className="space-y-8">
@@ -89,17 +85,21 @@ export const SquadOmniRouteTab: React.FC = () => {
                   </h2>
                   <span
                     className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                      omniHealth.status === 'online'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                      omniHealth.status === "online"
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
                     }`}
                   >
                     <span
                       className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-                        omniHealth.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                        omniHealth.status === "online"
+                          ? "bg-emerald-500 animate-pulse"
+                          : "bg-amber-500"
                       }`}
                     />
-                    {omniHealth.status === 'online' ? 'OmniRoute Online :20128' : 'OmniRoute Offline'}
+                    {omniHealth.status === "online"
+                      ? "OmniRoute Online :20128"
+                      : "OmniRoute Offline"}
                   </span>
                 </div>
                 <div className="flex items-center space-x-2 mt-1.5 text-xs text-slate-500 dark:text-slate-400">
@@ -110,7 +110,7 @@ export const SquadOmniRouteTab: React.FC = () => {
                   </span>
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800">
                     <CreditCard className="w-3.5 h-3.5 mr-1 text-cyan-500" />
-                    {paidCount} Pro / Pago
+                    {paidCount} Pago
                   </span>
                 </div>
               </div>
@@ -123,8 +123,10 @@ export const SquadOmniRouteTab: React.FC = () => {
               disabled={syncing}
               className="border-cyan-400/40 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/40"
             >
-              <RefreshCw className={`w-4 h-4 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? 'Sincronizando...' : 'Sincronizar Modelos Free'}
+              <RefreshCw
+                className={`w-4 h-4 mr-1.5 ${syncing ? "animate-spin" : ""}`}
+              />
+              {syncing ? "Sincronizando..." : "Sincronizar Modelos Free"}
             </Button>
           </div>
         </CardContent>
@@ -133,7 +135,10 @@ export const SquadOmniRouteTab: React.FC = () => {
       {/* Grid com os 6 Agentes Especialistas */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {specialists.map((agent) => (
-          <Card key={agent.id} className="border-slate-200 dark:border-slate-800 hover:border-cyan-500/50 transition">
+          <Card
+            key={agent.id}
+            className="border-slate-200 dark:border-slate-800 hover:border-cyan-500/50 transition"
+          >
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
                 <div>
@@ -144,10 +149,10 @@ export const SquadOmniRouteTab: React.FC = () => {
                     {agent.description}
                   </CardDescription>
                 </div>
-                {agent.role === 'ORCHESTRATOR' ? (
+                {agent.role === "ORCHESTRATOR" ? (
                   <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-cyan-100 text-cyan-800 dark:bg-cyan-950/70 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800 shadow-sm">
                     <CreditCard className="w-3.5 h-3.5 mr-1 text-cyan-600 dark:text-cyan-400" />
-                    Pro / Pago
+                    Pago
                   </span>
                 ) : (
                   <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-sm">
@@ -166,7 +171,11 @@ export const SquadOmniRouteTab: React.FC = () => {
                 </label>
                 <select
                   value={agent.primaryModel}
-                  onChange={(e) => handleUpdateSpecialist(agent.role, { primaryModel: e.target.value })}
+                  onChange={(e) =>
+                    handleUpdateSpecialist(agent.role, {
+                      primaryModel: e.target.value,
+                    })
+                  }
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium focus:ring-2 focus:ring-cyan-500 focus:outline-none"
                 >
                   {allowedModels.map((m) => (
@@ -184,7 +193,11 @@ export const SquadOmniRouteTab: React.FC = () => {
                 </label>
                 <select
                   value={agent.fallbackModel}
-                  onChange={(e) => handleUpdateSpecialist(agent.role, { fallbackModel: e.target.value })}
+                  onChange={(e) =>
+                    handleUpdateSpecialist(agent.role, {
+                      fallbackModel: e.target.value,
+                    })
+                  }
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium focus:ring-2 focus:ring-cyan-500 focus:outline-none"
                 >
                   {allowedModels.map((m) => (
@@ -199,7 +212,9 @@ export const SquadOmniRouteTab: React.FC = () => {
               <div className="space-y-1.5">
                 <div className="flex justify-between text-xs text-slate-500">
                   <span>Temperatura / Criatividade</span>
-                  <span className="font-mono text-cyan-600 dark:text-cyan-400">{agent.temperature}</span>
+                  <span className="font-mono text-cyan-600 dark:text-cyan-400">
+                    {agent.temperature}
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -207,7 +222,11 @@ export const SquadOmniRouteTab: React.FC = () => {
                   max="1.0"
                   step="0.1"
                   value={agent.temperature}
-                  onChange={(e) => handleUpdateSpecialist(agent.role, { temperature: parseFloat(e.target.value) })}
+                  onChange={(e) =>
+                    handleUpdateSpecialist(agent.role, {
+                      temperature: parseFloat(e.target.value),
+                    })
+                  }
                   className="w-full accent-cyan-500"
                 />
               </div>
@@ -215,7 +234,8 @@ export const SquadOmniRouteTab: React.FC = () => {
               {/* Feedback de Salvo */}
               {savedRole === agent.role && (
                 <div className="p-2 rounded bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-xs flex items-center">
-                  <Check className="w-3.5 h-3.5 mr-1" /> Configuração atualizada no banco!
+                  <Check className="w-3.5 h-3.5 mr-1" /> Configuração atualizada
+                  no banco!
                 </div>
               )}
             </CardContent>
