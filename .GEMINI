@@ -1,0 +1,107 @@
+# ==============================================================================
+# AGENT-HUB — Contexto de Sessão e Diretrizes de Engenharia (.GEMINI)
+# ==============================================================================
+# Este arquivo é lido nas sessões do Gemini / Antigravity para garantir 
+# a continuidade do desenvolvimento da plataforma autônoma Agent Hub.
+# ==============================================================================
+
+## 📌 1. Visão Geral do Projeto
+* **Nome do Projeto:** Agent Hub Monorepo
+* **Repositório GitHub:** `nlnadialigia/agent-hub` (privado)
+* **Localização no Workspace:** `/home/nlnadialigia/agents/agent-hub`
+* **Propósito:** Plataforma de Engenharia Autônoma Multi-Platform, Multi-Stack e Multi-LLM (via OmniRoute Gateway), operada por uma Squad de 1 Tech Lead e 5 Especialistas com isolamento concorrente via Git Worktrees.
+
+---
+
+## 🔌 2. Arquitetura de Portas & Infraestrutura Local
+As portas foram desenhadas exclusivamente para não colidir com nenhum outro serviço ou container da máquina:
+
+| Serviço | Nome do Container | Porta no Host | Porta Interna | Descrição |
+| :--- | :--- | :--- | :--- | :--- |
+| **Frontend Web** | `agent_hub_web` | `http://localhost:3001` | `3000` | React + Vite + Tailwind (Cyan & Light/Dark) |
+| **Backend API** | `agent_hub_api` | `http://localhost:3334` | `3333` | NestJS + Prisma + Multi-Runtime Runner |
+| **PostgreSQL 18** | `agent_hub_postgres` | `localhost:5433` | `5432` | Banco dedicado (`agent_hub_db`) |
+| **OmniRoute AI** | `agent_hub_omniroute`| `http://localhost:20128`| `20128`| AI Gateway Multi-LLM (Free + Gemini Pago) |
+
+**Comando para subir os containers:**
+```bash
+docker compose up -d --build
+```
+
+---
+
+## 🛠️ 3. Padrões de Desenvolvimento & Comandos Obrigatórios
+* **Gerenciador de Pacotes:** `pnpm` (versão 12.16.1 estrita). NUNCA utilize npm ou yarn.
+* **Compilação Total do Monorepo:**
+  ```bash
+  pnpm -r build
+  ```
+* **Geração do Cliente Prisma:**
+  ```bash
+  pnpm --filter @agent-hub/api prisma:generate
+  ```
+* **Seed Inicial do Banco de Dados (Squad + Catálogo de Modelos):**
+  ```bash
+  pnpm --filter @agent-hub/api seed
+  ```
+* **Idioma de Comunicação:** Sempre responder em Português (`pt-br`).
+* **Documentos e Rascunhos:** Salvar na pasta `rascunho/` do workspace.
+
+---
+
+## 🌿 4. Governança Git & Fluxo de Pull Requests
+* **Proteção de Branch:** Push direto em `main` e `develop` é bloqueado pelo hook `.githooks/pre-push`.
+* **Fluxo de Trabalho:**
+  1. Criar branch de feature: `git checkout -b feat/issue_xx` ou `feat/nome_da_feature`.
+  2. Implementar, testar e compilar (`pnpm -r build`).
+  3. Fazer commit e push: `git push origin feat/...`.
+  4. O GitHub Actions (`.github/workflows/auto-create-pr.yml`) abrirá o PR automaticamente anexando `Closes #xx`.
+  5. O workflow `.github/workflows/pr-validation.yml` valida lint, build e tests antes do merge.
+
+---
+
+## 🤖 5. Squad Especialista & Roteamento OmniRoute
+A Squad opera sob o princípio da **Economia Inteligente**:
+* **🎯 Tech Lead Orchestrator:**
+  * Responsabilidade: Diagnóstico Antigravity (focado em texto/regras, pouquíssimo código) e árvore de decisões Grill-Me.
+  * Modelo Principal: `gemini-2.5-pro` (Único modelo pago da usuária).
+  * Fallback Automático: `deepseek-r1-free` (via OmniRoute) / Gemini SDK direto.
+* **🛠️ 5 Agentes Especialistas (100% Free):**
+  * **🗄️ Database & ORM Specialist:** `gemini-2.5-pro-free` (Fallback: `auto`)
+  * **🟢 Backend Node/TS Specialist:** `deepseek-v3-free` (Fallback: `qwen-2.5-coder-free`)
+  * **🐍 Backend Python Specialist:** `qwen-2.5-coder-free` (Fallback: `auto`)
+  * **🎨 Frontend Web Specialist:** `gemini-2.5-flash-free` (Fallback: `auto`)
+  * **🧪 QA, E2E & DevOps Specialist:** `auto` (Fallback: `llama-3.3-70b-groq`) com **Self-Healing automático de até 3 tentativas** de correção de testes.
+
+---
+
+## 🔄 6. Conectores N:M & Desacoplamento Total
+Qualquer Board pode ser combinado com qualquer Repositório Git:
+* **Task Providers (Boards):**
+  * `Kanbanize`: Leitura de Cards e **criação/atualização de Subtasks em tempo real na API v2** (`POST /api/v2/cards/{id}/subtasks`).
+  * `GitHub Issues`, `Jira`, `Trello`, `Linear` e `Manual` (prompt direto sem card).
+* **VCS Providers (Git):**
+  * `GitHub`: PR apontando para `main`.
+  * `Azure DevOps`: PR apontando para `develop` (ou branch alvo configurada).
+  * `GitLab`, `Bitbucket` e `Local Only` (sandbox local).
+* **Branch Alvo (`targetBranch`):** Mapeada e editável por repositório no perfil poliglota.
+
+---
+
+## 🖥️ 7. Interface Web (6 Abas)
+Localizada em `apps/web`:
+1. `➕ Inserir Tarefa`: Seletores de board, repo e VCS, modo Fila vs Concomitante, instruções Markdown e Painel da Fila Viva.
+2. `⚡ Execução de Tarefa`: Monitor multi-agente, Decisão Humana com Refinamento Iterativo (Aprovar/Refinar/Rejeitar), Terminal de Logs colorido por especialista e Relatório Simples de Entrega Copiável em 1 clique.
+3. `🤖 Squad & OmniRoute`: Gerenciamento de modelos e fallbacks dos 6 agentes, sincronização de modelos Free e status do gateway :20128.
+4. `📁 Repositórios`: Cards de perfis poliglotas e configuração de `targetBranch`.
+5. `📜 Histórico`: Tabela com data `DD/MM/AAAA`, soft-delete e alternador Mostrar Arquivados.
+6. `⚙️ Configurações & Integrações`: Cofre de credenciais criptografadas em AES-256 com botões de Testar Conexão em tempo real.
+* **Tema Visual:** Identidade visual **Cyan (`cyan-500` / `cyan-600`)** com suporte a **Light Mode & Dark Mode** persistente em `localStorage`.
+
+---
+
+## 📋 8. Histórico de Commits da Fundação (Fases 1 a 4)
+* `859a3d5` — `feat(phase-1): monorepo foundation, docker compose, prisma schema & baseline web/api`
+* `bc63952` — `feat(phase-2): credentials vault, omniroute service & task/vcs providers`
+* `687965e` — `feat(phase-3): polyglot scanner, git worktree sandbox & autonomous multi-agent squad`
+* `5217dde` — `feat(phase-4): 6-tab responsive web interface with light/dark mode and cyan palette`
