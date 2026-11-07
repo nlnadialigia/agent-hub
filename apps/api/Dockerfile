@@ -26,4 +26,4 @@ RUN pnpm build
 
 EXPOSE 3333
 
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node dist/main.js"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && (npx tsx prisma/seed.ts || true) && node dist/main.js"]

@@ -4,5 +4,6 @@ dist
 .DS_Store
 coverage
 *.log
+*.tsbuildinfo
 .worktrees
 worktrees
