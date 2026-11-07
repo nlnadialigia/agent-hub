@@ -1,0 +1,38 @@
+name: PR Validation (Lint, Build & Test)
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.16.1
+
+      - name: Setup Node.js LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Run Lint
+        run: pnpm lint
+
+      - name: Run Build
+        run: pnpm build
+
+      - name: Run Tests
+        run: pnpm test

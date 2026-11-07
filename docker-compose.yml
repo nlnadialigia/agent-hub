@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: agent_hub_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-agent_hub_db}
+    ports:
+      - "5433:5432"
+    volumes:
+      - agent_hub_pg_data:/var/lib/postgresql
+    networks:
+      - agent-hub-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-agent_hub_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  omniroute:
+    image: diegosouzapw/omniroute:latest
+    container_name: agent_hub_omniroute
+    restart: unless-stopped
+    ports:
+      - "20128:20128"
+    volumes:
+      - agent_hub_omniroute_data:/app/data
+    networks:
+      - agent-hub-network
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: agent_hub_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      omniroute:
+        condition: service_started
+    ports:
+      - "3334:3333"
+    environment:
+      NODE_ENV: production
+      PORT: 3333
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-agent_hub_db}?schema=public
+      VAULT_SECRET_KEY: ${VAULT_SECRET_KEY:-agent_hub_super_secret_vault_key_2026_32bytes!}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://omniroute:20128/v1}
+      OMNIROUTE_PUBLIC_URL: http://localhost:20128
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-sk-omniroute-local}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ALLOWED_PAID_MODELS: ${ALLOWED_PAID_MODELS:-gemini-2.5-pro}
+      ALLOWED_FREE_MODELS: ${ALLOWED_FREE_MODELS:-deepseek-v3-free,deepseek-r1-free,qwen-2.5-coder-free,gemini-2.5-pro-free,gemini-2.5-flash-free,llama-3.3-70b-groq,auto}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      KANBANIZE_SUBDOMAIN: ${KANBANIZE_SUBDOMAIN:-}
+      KANBANIZE_API_KEY: ${KANBANIZE_API_KEY:-}
+      AZURE_DEVOPS_ORG_URL: ${AZURE_DEVOPS_ORG_URL:-}
+      AZURE_DEVOPS_PROJECT: ${AZURE_DEVOPS_PROJECT:-}
+      AZURE_DEVOPS_TOKEN: ${AZURE_DEVOPS_TOKEN:-}
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_EMAIL: ${JIRA_EMAIL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      BITBUCKET_TOKEN: ${BITBUCKET_TOKEN:-}
+      REPOS_BASE_DIR: /workspace/repos
+      WORKTREES_BASE_DIR: /workspace/worktrees
+    volumes:
+      - ${HOST_REPOS_PATH:-../}:/workspace/repos
+      - agent_hub_worktrees:/workspace/worktrees
+      - ~/.gitconfig:/root/.gitconfig:ro
+    networks:
+      - agent-hub-network
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: agent_hub_web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3001:3000"
+    environment:
+      VITE_API_URL: http://localhost:3334
+      VITE_WS_URL: ws://localhost:3334
+    networks:
+      - agent-hub-network
+
+volumes:
+  agent_hub_pg_data:
+    driver: local
+  agent_hub_omniroute_data:
+    driver: local
+  agent_hub_worktrees:
+    driver: local
+
+networks:
+  agent-hub-network:
+    driver: bridge

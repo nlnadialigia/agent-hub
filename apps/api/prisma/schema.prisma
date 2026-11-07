@@ -1,0 +1,127 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+// Conexões e Credenciais salvas na aba de Configurações (Criptografadas com AES-256)
+model IntegrationConnection {
+  id           String   @id @default(uuid())
+  name         String   // Ex: "GitHub Pessoal", "Kanbanize Squad", "Azure DevOps"
+  category     String   // "TASK_PROVIDER" | "VCS_PROVIDER" | "LLM_PROVIDER"
+  providerType String   @unique // "GITHUB_ISSUES", "KANBANIZE", "JIRA", "TRELLO", "LINEAR", "GITHUB", "AZURE_DEVOPS", "GITLAB", "BITBUCKET", "OMNIROUTE", "GEMINI"
+  configJson   String   @db.Text // JSON criptografado (API Keys, Tokens, Subdomain, Org URL)
+  isDefault    Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Configuração de Modelos por Agente Especialista (Editável na aba Squad & OmniRoute)
+model SpecialistAgentConfig {
+  id                 String   @id @default(uuid())
+  role               String   @unique // "ORCHESTRATOR", "BACKEND_NODE", "BACKEND_PYTHON", "FRONTEND", "DATABASE", "QA_DEVOPS"
+  displayName        String
+  description        String
+  llmProvider        String   @default("OMNIROUTE") // "OMNIROUTE" | "GEMINI_DIRECT"
+  primaryModel       String   @default("auto")      // Modelo Principal (Ex: "gemini-2.5-pro" no Tech Lead, "deepseek-v3-free" nos especialistas)
+  fallbackModel      String   @default("auto")      // Modelo de Fallback automático
+  temperature        Float    @default(0.2)
+  customSystemPrompt String?  @db.Text
+  updatedAt          DateTime @updatedAt
+}
+
+// Catálogo Curado de Modelos Autorizados (Free do OmniRoute + Pagos cadastrados pela usuária)
+model AllowedModelCatalog {
+  id          String   @id @default(uuid())
+  modelId     String   @unique // Ex: "gemini-2.5-pro", "deepseek-v3-free", "qwen-2.5-coder-free"
+  displayName String
+  provider    String   // Ex: "GEMINI_PAID", "OMNIROUTE_FREE", "GROQ_FREE", "OPENROUTER_FREE"
+  costTier    String   @default("FREE") // "FREE" | "PAID"
+  isEnabled   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Perfil Poliglota do Repositório
+model RepositoryProfile {
+  id               String          @id @default(uuid())
+  name             String          @unique
+  localPath        String
+  remoteUrl        String?
+  detectedVcs      String          @default("LOCAL_ONLY") // "GITHUB", "AZURE_DEVOPS", "GITLAB", "BITBUCKET", "LOCAL_ONLY"
+  targetBranch     String          @default("main")       // Branch Alvo padrão para PRs ("develop" no Azure, "main" no GitHub)
+  lastAnalyzedAt   DateTime        @default(now())
+  lastCommitHash   String
+  
+  // Metadados Multi-Stack
+  stacks           Json            // Ex: ["NODE_TS", "REACT", "PYTHON", "PRISMA", "DOCKER"]
+  primaryLanguage  String          // Ex: "TypeScript", "Python", "Polyglot"
+  frameworks       Json            // Ex: { backend: "NestJS", frontend: "React/Vite", python: "FastAPI" }
+  packageManagers  Json            // Ex: ["pnpm", "uv"]
+  orm              String?         // Ex: "Prisma", "Drizzle", "SQLAlchemy"
+  validationLibs   Json            // Ex: ["Zod", "Pydantic"]
+  testFrameworks   Json            // Ex: ["Jest", "Playwright", "Pytest"]
+  directoryLayout  Json
+  codingStandards  Json
+  
+  tasks            TaskExecution[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+// Execução de Tarefa
+model TaskExecution {
+  id                 String            @id @default(uuid())
+  cardId             String
+  cardTitle          String
+  cardDescription    String?           @db.Text
+  customInstructions String?           @db.Text
+  
+  // Desacoplamento Board vs. Git
+  taskProvider       String            @default("GITHUB_ISSUES") // Origem do Card
+  vcsProvider        String            @default("GITHUB")        // Destino do PR
+  targetBranch       String            @default("main")          // Branch Alvo do PR ("develop", "main", etc.)
+  executionMode      ExecutionMode     @default(SEQUENTIAL)
+  
+  // Agentes acionados pelo Orquestrador
+  assignedAgents     Json?             // Ex: ["DATABASE", "BACKEND_NODE", "FRONTEND", "QA_DEVOPS"]
+  modelUsed          String?           // Modelo/Combo utilizado
+  
+  repositoryId       String
+  repository         RepositoryProfile @relation(fields: [repositoryId], references: [id])
+  
+  status             TaskStatus        @default(PENDING_DIAGNOSTIC)
+  diagnosticPlan     String?           @db.Text // Focado em texto, entendimento de negócio, mapa de impacto e Grill-Me
+  boardSubtasks      Json?             // Subtasks criadas/sincronizadas no Kanbanize/Board
+  deliveryReport     String?           @db.Text // Relatório executivo final copiável + lista de subtasks
+  branchName         String?
+  worktreePath       String?
+  pullRequestUrl     String?
+  executionLogs      Json?
+  isArchived         Boolean           @default(false)
+  
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+}
+
+enum ExecutionMode {
+  SEQUENTIAL
+  CONCURRENT
+}
+
+enum TaskStatus {
+  QUEUED
+  PENDING_DIAGNOSTIC
+  WAITING_APPROVAL
+  IMPLEMENTING
+  RUNNING_TESTS
+  SELF_HEALING
+  COMPLETED
+  FAILED
+  REJECTED
+}

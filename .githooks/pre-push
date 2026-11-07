@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+current_branch=$(git symbolic-ref HEAD | sed -e 's,.*/\(.*\),\1,')
+
+if [ "$current_branch" = "main" ] || [ "$current_branch" = "develop" ]; then
+  echo "❌ [Bloqueio de Segurança] Push direto na branch '$current_branch' não é permitido!"
+  echo "💡 Crie uma branch de feature (ex: feat/issue_01) e abra um Pull Request."
+  exit 1
+fi
+
+exit 0

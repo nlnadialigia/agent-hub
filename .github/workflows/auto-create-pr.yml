@@ -1,0 +1,61 @@
+name: Auto Create Pull Request & Link Issue
+
+on:
+  push:
+    branches:
+      - "feat/**"
+      - "fix/**"
+      - "chore/**"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  auto-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Pull Request and Link Issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          echo "Branch detectada: $BRANCH_NAME"
+
+          EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Já existe o PR #$EXISTING_PR aberto para $BRANCH_NAME."
+            exit 0
+          fi
+
+          ISSUE_NUM=""
+          if [[ "$BRANCH_NAME" =~ issue[_-]?0*([0-9]+) ]]; then
+            ISSUE_NUM="${BASH_REMATCH[1]}"
+          fi
+
+          LAST_COMMIT_MSG=$(git log -1 --pretty=%s)
+
+          if [ -n "$ISSUE_NUM" ]; then
+            ISSUE_TITLE=$(gh issue view "$ISSUE_NUM" --json title --jq '.title' 2>/dev/null || echo "")
+            if [ -n "$ISSUE_TITLE" ]; then
+              PR_TITLE="feat(issue-#$ISSUE_NUM): $ISSUE_TITLE"
+            else
+              PR_TITLE="$LAST_COMMIT_MSG (#$ISSUE_NUM)"
+            fi
+            PR_BODY="Pull Request criado automaticamente a partir da branch \`$BRANCH_NAME\`.\n\nCloses #$ISSUE_NUM"
+          else
+            PR_TITLE="$LAST_COMMIT_MSG"
+            PR_BODY="Pull Request criado automaticamente a partir da branch \`$BRANCH_NAME\`."
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH_NAME" \
+            --title "$PR_TITLE" \
+            --body "$(echo -e "$PR_BODY")"
