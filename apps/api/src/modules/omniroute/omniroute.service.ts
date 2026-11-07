@@ -38,9 +38,9 @@ export class OmniRouteService {
   async resolveWorkingBaseUrl(): Promise<string> {
     const omniConfig = await this.vaultService.getEffectiveConfig('OMNIROUTE');
     const candidates = [
+      'http://omniroute:20128/v1',
       process.env.OMNIROUTE_BASE_URL,
       omniConfig.baseUrl,
-      'http://omniroute:20128/v1',
       'http://localhost:20128/v1',
     ].filter(Boolean) as string[];
 
@@ -54,7 +54,13 @@ export class OmniRouteService {
         });
         return url;
       } catch {
-        // Tenta o próximo
+        try {
+          const rootUrl = url.replace(/\/v1\/?$/, '');
+          const res = await axios.get(`${rootUrl}/healthz`, { timeout: 1500 });
+          if (res.status === 200) return url;
+        } catch {
+          // Tenta o próximo
+        }
       }
     }
 
@@ -67,9 +73,9 @@ export class OmniRouteService {
   async checkHealth(): Promise<{ status: 'online' | 'offline'; baseUrl: string; message: string }> {
     const omniConfig = await this.vaultService.getEffectiveConfig('OMNIROUTE');
     const candidates = [
+      'http://omniroute:20128/v1',
       process.env.OMNIROUTE_BASE_URL,
       omniConfig.baseUrl,
-      'http://omniroute:20128/v1',
       'http://localhost:20128/v1',
     ].filter(Boolean) as string[];
 
@@ -89,8 +95,21 @@ export class OmniRouteService {
           baseUrl,
           message: `OmniRoute ativo com ${response.data?.data?.length || 0} modelos detectados.`,
         };
-      } catch {
-        // Tenta próxima URL candidata
+      } catch (err: any) {
+        // Fallback: se o gateway estiver rodando mas sem modelos ou aguardando autenticação, probe /healthz
+        try {
+          const rootUrl = baseUrl.replace(/\/v1\/?$/, '');
+          const healthzRes = await axios.get(`${rootUrl}/healthz`, { timeout: 2000 });
+          if (healthzRes.status === 200) {
+            return {
+              status: 'online',
+              baseUrl,
+              message: 'OmniRoute Online :20128 (Gateway ativo e operacional).',
+            };
+          }
+        } catch {
+          // Tenta próxima URL candidata
+        }
       }
     }
 
