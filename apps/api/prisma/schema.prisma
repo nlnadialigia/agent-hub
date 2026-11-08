@@ -47,16 +47,32 @@ model AllowedModelCatalog {
   updatedAt   DateTime @updatedAt
 }
 
+// Pastas-Raiz Monitoradas (Ex: /home/nlnadialigia/suzano, /home/nlnadialigia/www)
+model MonitoredDirectory {
+  id                String              @id @default(uuid())
+  path              String              @unique // Ex: "/home/nlnadialigia/suzano"
+  name              String              // Ex: "suzano", "www"
+  scannedReposCount Int                 @default(0)
+  lastScannedAt     DateTime            @default(now())
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  repositories      RepositoryProfile[]
+}
+
 // Perfil Poliglota do Repositório
 model RepositoryProfile {
-  id               String          @id @default(uuid())
-  name             String          @unique
-  localPath        String
-  remoteUrl        String?
-  detectedVcs      String          @default("LOCAL_ONLY") // "GITHUB", "AZURE_DEVOPS", "GITLAB", "BITBUCKET", "LOCAL_ONLY"
-  targetBranch     String          @default("main")       // Branch Alvo padrão para PRs ("develop" no Azure, "main" no GitHub)
-  lastAnalyzedAt   DateTime        @default(now())
-  lastCommitHash   String
+  id                   String              @id @default(uuid())
+  name                 String              @unique
+  localPath            String
+  remoteUrl            String?
+  detectedVcs          String              @default("LOCAL_ONLY") // "GITHUB", "AZURE_DEVOPS", "GITLAB", "BITBUCKET", "LOCAL_ONLY"
+  targetBranch         String              @default("main")       // Branch Alvo padrão para PRs ("develop" no Azure, "main" no GitHub)
+  lastAnalyzedAt       DateTime            @default(now())
+  lastCommitHash       String
+  
+  monitoredDirectoryId String?
+  monitoredDirectory   MonitoredDirectory? @relation(fields: [monitoredDirectoryId], references: [id], onDelete: SetNull)
   
   // Metadados Multi-Stack
   stacks           Json            // Ex: ["NODE_TS", "REACT", "PYTHON", "PRISMA", "DOCKER"]
