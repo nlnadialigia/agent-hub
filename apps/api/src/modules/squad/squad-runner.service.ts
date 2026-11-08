@@ -6,6 +6,7 @@ import { GitWorktreeService } from '../repository/git-worktree.service';
 import { ProvidersManagerService } from '../providers/providers-manager.service';
 import { OrchestratorAgent } from './orchestrator.agent';
 import { SpecialistAgentsService } from './specialist.agents';
+import { FailureIssueReporterService } from './failure-issue-reporter.service';
 
 export interface CreateTaskDto {
   cardId: string;
@@ -16,6 +17,12 @@ export interface CreateTaskDto {
   targetBranch?: string;
   executionMode?: 'SEQUENTIAL' | 'CONCURRENT';
   customInstructions?: string;
+}
+
+export interface RetryTaskDto {
+  customInstructions?: string;
+  resumeFromCheckpoint?: boolean;
+  allowPaidFallback?: boolean;
 }
 
 @Injectable()
@@ -30,7 +37,8 @@ export class SquadRunnerService {
     private readonly worktreeService: GitWorktreeService,
     private readonly providersManager: ProvidersManagerService,
     private readonly orchestrator: OrchestratorAgent,
-    private readonly specialists: SpecialistAgentsService
+    private readonly specialists: SpecialistAgentsService,
+    private readonly failureReporter: FailureIssueReporterService
   ) {}
 
   /**
@@ -124,7 +132,7 @@ export class SquadRunnerService {
   /**
    * Ciclo de Vida Completo da Tarefa
    */
-  async executeTaskLifecycle(taskId: string) {
+  async executeTaskLifecycle(taskId: string, options?: { resumeFromCheckpoint?: boolean }) {
     const task = await this.prisma.taskExecution.findUnique({
       where: { id: taskId },
       include: { repository: true },
@@ -132,97 +140,138 @@ export class SquadRunnerService {
 
     if (!task) return;
 
+    let currentStage: 'DIAGNOSTIC' | 'IMPLEMENTATION' | 'PR_CREATION' = 'DIAGNOSTIC';
+    const collectedLogs: string[] = Array.isArray(task.executionLogs)
+      ? [...(task.executionLogs as string[])]
+      : [];
+
+    const appendAndEmitLog = (
+      message: string,
+      type: 'info' | 'warn' | 'error' | 'success' = 'info',
+      badge = '🎯 Tech Lead'
+    ) => {
+      collectedLogs.push(`[${new Date().toISOString()}] [${badge}] (${type.toUpperCase()}) ${message}`);
+      this.gateway.emitLog(taskId, message, type, badge);
+    };
+
     try {
       // -------------------------------------------------------------
       // ETAPA 1: DIAGNÓSTICO DO TECH LEAD & HUMAN-IN-THE-LOOP
       // -------------------------------------------------------------
-      await this.prisma.taskExecution.update({
-        where: { id: taskId },
-        data: { status: 'PENDING_DIAGNOSTIC' },
-      });
-      this.gateway.emitStatus(taskId, 'PENDING_DIAGNOSTIC');
-      this.gateway.emitLog(taskId, 'Iniciando análise arquitetural e entendimento de regras...', 'info', '🎯 Tech Lead');
+      let diagnosticResult: {
+        rawMarkdown: string;
+        assignedSpecialists: string[];
+        subtasks: string[];
+        summary: string;
+      };
 
-      let diagnosticResult = await this.orchestrator.generateDiagnostic({
-        cardId: task.cardId,
-        cardTitle: task.cardTitle,
-        cardDescription: task.cardDescription || '',
-        customInstructions: task.customInstructions || undefined,
-        repoProfile: task.repository,
-      });
-
-      // Atualiza tarefa com o diagnóstico gerado
-      await this.prisma.taskExecution.update({
-        where: { id: taskId },
-        data: {
-          diagnosticPlan: diagnosticResult.rawMarkdown,
-          assignedAgents: diagnosticResult.assignedSpecialists,
-          status: 'WAITING_APPROVAL',
-        },
-      });
-
-      // Loop de Decisão Humana com Refinamento Iterativo
-      let approved = false;
-      while (!approved) {
-        this.gateway.emitLog(
-          taskId,
-          'Diagnóstico concluído. Aguardando decisão do desenvolvedor (Aprovar, Rejeitar ou Refinar)...',
+      if (options?.resumeFromCheckpoint && task.diagnosticPlan) {
+        appendAndEmitLog(
+          'Retomando a partir do diagnóstico arquitetural já aprovado anteriormente...',
           'info',
           '🎯 Tech Lead'
         );
+        const existingAssigned = Array.isArray(task.assignedAgents)
+          ? (task.assignedAgents as string[])
+          : ['BACKEND_NODE', 'QA_DEVOPS'];
+        diagnosticResult = {
+          rawMarkdown: task.diagnosticPlan,
+          assignedSpecialists: existingAssigned,
+          subtasks: ['Implementação retomada pela Squad', 'Validação de qualidade e testes'],
+          summary: `Retomada da implementação para #${task.cardId} - ${task.cardTitle}`,
+        };
+      } else {
+        await this.prisma.taskExecution.update({
+          where: { id: taskId },
+          data: { status: 'PENDING_DIAGNOSTIC', errorMessage: null },
+        });
+        this.gateway.emitStatus(taskId, 'PENDING_DIAGNOSTIC');
+        appendAndEmitLog('Iniciando análise arquitetural e entendimento de regras...', 'info', '🎯 Tech Lead');
 
-        const decision: HumanDecision = await this.gateway.requestDecision(taskId, diagnosticResult.rawMarkdown);
+        diagnosticResult = await this.orchestrator.generateDiagnostic({
+          taskId,
+          cardId: task.cardId,
+          cardTitle: task.cardTitle,
+          cardDescription: task.cardDescription || '',
+          customInstructions: task.customInstructions || undefined,
+          repoProfile: task.repository,
+        });
 
-        if (decision.action === 'REJECT') {
-          this.gateway.emitLog(taskId, 'Tarefa rejeitada pelo desenvolvedor.', 'warn', '🎯 Tech Lead');
-          await this.prisma.taskExecution.update({
-            where: { id: taskId },
-            data: { status: 'REJECTED' },
-          });
-          this.gateway.emitStatus(taskId, 'REJECTED');
-          return;
-        }
+        // Atualiza tarefa com o diagnóstico gerado
+        await this.prisma.taskExecution.update({
+          where: { id: taskId },
+          data: {
+            diagnosticPlan: diagnosticResult.rawMarkdown,
+            assignedAgents: diagnosticResult.assignedSpecialists,
+            status: 'WAITING_APPROVAL',
+            executionLogs: collectedLogs,
+          },
+        });
 
-        if (decision.action === 'REFINE') {
-          this.gateway.emitLog(
-            taskId,
-            `Refinamento solicitado: "${decision.feedback}". Ajustando diagnóstico...`,
+        // Loop de Decisão Humana com Refinamento Iterativo
+        let approved = false;
+        while (!approved) {
+          appendAndEmitLog(
+            'Diagnóstico concluído. Aguardando decisão do desenvolvedor (Aprovar, Rejeitar ou Refinar)...',
             'info',
             '🎯 Tech Lead'
           );
 
-          diagnosticResult = await this.orchestrator.generateDiagnostic({
-            cardId: task.cardId,
-            cardTitle: task.cardTitle,
-            cardDescription: task.cardDescription || '',
-            customInstructions: task.customInstructions || undefined,
-            repoProfile: task.repository,
-            previousFeedback: decision.feedback,
-            existingDiagnostic: diagnosticResult.rawMarkdown,
-          });
+          const decision: HumanDecision = await this.gateway.requestDecision(taskId, diagnosticResult.rawMarkdown);
 
-          await this.prisma.taskExecution.update({
-            where: { id: taskId },
-            data: {
-              diagnosticPlan: diagnosticResult.rawMarkdown,
-              assignedAgents: diagnosticResult.assignedSpecialists,
-            },
-          });
-          continue; // Volta para aguardar aprovação da versão refinada
-        }
+          if (decision.action === 'REJECT') {
+            appendAndEmitLog('Tarefa rejeitada pelo desenvolvedor.', 'warn', '🎯 Tech Lead');
+            await this.prisma.taskExecution.update({
+              where: { id: taskId },
+              data: { status: 'REJECTED', executionLogs: collectedLogs },
+            });
+            this.gateway.emitStatus(taskId, 'REJECTED');
+            return;
+          }
 
-        if (decision.action === 'APPROVE') {
-          approved = true;
-          this.gateway.emitLog(taskId, 'Diagnóstico aprovado! Iniciando escalação da Squad...', 'success', '🎯 Tech Lead');
+          if (decision.action === 'REFINE') {
+            appendAndEmitLog(
+              `Refinamento solicitado: "${decision.feedback}". Ajustando diagnóstico...`,
+              'info',
+              '🎯 Tech Lead'
+            );
+
+            diagnosticResult = await this.orchestrator.generateDiagnostic({
+              taskId,
+              cardId: task.cardId,
+              cardTitle: task.cardTitle,
+              cardDescription: task.cardDescription || '',
+              customInstructions: task.customInstructions || undefined,
+              repoProfile: task.repository,
+              previousFeedback: decision.feedback,
+              existingDiagnostic: diagnosticResult.rawMarkdown,
+            });
+
+            await this.prisma.taskExecution.update({
+              where: { id: taskId },
+              data: {
+                diagnosticPlan: diagnosticResult.rawMarkdown,
+                assignedAgents: diagnosticResult.assignedSpecialists,
+                executionLogs: collectedLogs,
+              },
+            });
+            continue; // Volta para aguardar aprovação da versão refinada
+          }
+
+          if (decision.action === 'APPROVE') {
+            approved = true;
+            appendAndEmitLog('Diagnóstico aprovado! Iniciando escalação da Squad...', 'success', '🎯 Tech Lead');
+          }
         }
       }
 
       // -------------------------------------------------------------
       // ETAPA 2: CRIAÇÃO DA WORKTREE ISOLADA & SUBTASKS DO BOARD
       // -------------------------------------------------------------
+      currentStage = 'IMPLEMENTATION';
       await this.prisma.taskExecution.update({
         where: { id: taskId },
-        data: { status: 'IMPLEMENTING' },
+        data: { status: 'IMPLEMENTING', executionLogs: collectedLogs },
       });
       this.gateway.emitStatus(taskId, 'IMPLEMENTING');
 
@@ -240,7 +289,7 @@ export class SquadRunnerService {
       // Sincroniza subtasks planejadas no Kanbanize
       const syncedSubtasks: Array<{ id: string; title: string }> = [];
       if (task.taskProvider === 'KANBANIZE' && diagnosticResult.subtasks.length > 0) {
-        this.gateway.emitLog(taskId, 'Criando subtasks no card do Kanbanize via REST API v2...', 'info', '📋 Kanbanize');
+        appendAndEmitLog('Criando subtasks no card do Kanbanize via REST API v2...', 'info', '📋 Kanbanize');
         for (const subTitle of diagnosticResult.subtasks) {
           const created = await this.providersManager.createSubtask('KANBANIZE', task.cardId, subTitle);
           syncedSubtasks.push(created);
@@ -266,9 +315,10 @@ export class SquadRunnerService {
 
       for (const role of diagnosticResult.assignedSpecialists) {
         const badge = specialistsMap[role] || `🤖 ${role}`;
-        this.gateway.emitLog(taskId, `Escalando ${badge}...`, 'info', badge);
+        appendAndEmitLog(`Escalando ${badge}...`, 'info', badge);
 
         const result = await this.specialists.executeSpecialist({
+          taskId,
           role,
           badge,
           worktreePath,
@@ -276,7 +326,7 @@ export class SquadRunnerService {
           cardDescription: task.cardDescription || '',
           diagnosticPlan: diagnosticResult.rawMarkdown,
           repoProfile: task.repository,
-          emitLog: (msg, type) => this.gateway.emitLog(taskId, msg, type, badge),
+          emitLog: (msg, type) => appendAndEmitLog(msg, type, badge),
         });
 
         allModifiedFiles.push(...result.filesModified);
@@ -286,7 +336,7 @@ export class SquadRunnerService {
           const matchSub = syncedSubtasks.find((s) => s.title.toLowerCase().includes(role.toLowerCase()));
           if (matchSub) {
             await this.providersManager.completeSubtask('KANBANIZE', task.cardId, matchSub.id);
-            this.gateway.emitLog(taskId, `Subtask #${matchSub.id} concluída no Kanbanize.`, 'success', '📋 Kanbanize');
+            appendAndEmitLog(`Subtask #${matchSub.id} concluída no Kanbanize.`, 'success', '📋 Kanbanize');
           }
         }
       }
@@ -294,12 +344,12 @@ export class SquadRunnerService {
       // -------------------------------------------------------------
       // ETAPA 4: COMMIT, PUSH & PULL REQUEST
       // -------------------------------------------------------------
-      this.gateway.emitLog(taskId, `Realizando commit na branch '${branchName}'...`, 'info', '🌿 Git');
+      currentStage = 'PR_CREATION';
+      appendAndEmitLog(`Realizando commit na branch '${branchName}'...`, 'info', '🌿 Git');
       const commitMsg = `feat(#${task.cardId}): ${task.cardTitle}`;
       await this.worktreeService.commitAndPush(worktreePath, commitMsg, branchName);
 
-      this.gateway.emitLog(
-        taskId,
+      appendAndEmitLog(
         `Abrindo Pull Request apontando para '${task.targetBranch}' via ${task.vcsProvider}...`,
         'info',
         '🦊 VCS'
@@ -314,7 +364,7 @@ export class SquadRunnerService {
         issueNumberToClose: task.cardId,
       });
 
-      this.gateway.emitLog(taskId, `PR criado com sucesso: ${prResult.url}`, 'success', '🦊 VCS');
+      appendAndEmitLog(`PR criado com sucesso: ${prResult.url}`, 'success', '🦊 VCS');
 
       // -------------------------------------------------------------
       // ETAPA 5: GERAÇÃO DO RELATÓRIO SIMPLES DE ENTREGA COPIÁVEL
@@ -336,23 +386,101 @@ export class SquadRunnerService {
           status: 'COMPLETED',
           pullRequestUrl: prResult.url,
           deliveryReport,
+          errorMessage: null,
+          executionLogs: collectedLogs,
         },
       });
 
       this.gateway.emitStatus(taskId, 'COMPLETED', { prUrl: prResult.url, deliveryReport });
-      this.gateway.emitLog(taskId, '🎉 Tarefa concluída com sucesso pela Squad!', 'success', '🎯 Tech Lead');
+      appendAndEmitLog('🎉 Tarefa concluída com sucesso pela Squad!', 'success', '🎯 Tech Lead');
 
       // Limpeza da worktree
       await this.worktreeService.removeWorktree(task.repository.localPath, worktreePath);
     } catch (error: any) {
       this.logger.error(`Falha fatal na execução da tarefa ${taskId}: ${error.message}`);
+      appendAndEmitLog(`Falha na execução (${currentStage}): ${error.message}`, 'error', '🎯 Tech Lead');
+
       await this.prisma.taskExecution.update({
         where: { id: taskId },
-        data: { status: 'FAILED' },
+        data: {
+          status: 'FAILED',
+          errorMessage: error.message,
+          failedStage: currentStage,
+          executionLogs: collectedLogs,
+        },
       });
-      this.gateway.emitStatus(taskId, 'FAILED', { error: error.message });
-      this.gateway.emitLog(taskId, `Falha na execução: ${error.message}`, 'error', '🎯 Tech Lead');
+
+      // Cria automaticamente (com trava anti-duplicidade) a Issue da falha em nlnadialigia/agent-hub
+      const issueReport = await this.failureReporter.reportTaskFailure({
+        taskId,
+        cardId: task.cardId,
+        cardTitle: task.cardTitle,
+        repositoryName: task.repository.name,
+        failedStage: currentStage,
+        errorMessage: error.message,
+        recentLogs: collectedLogs,
+      });
+
+      if (issueReport.issueUrl) {
+        const actionLabel = issueReport.created ? 'criada automaticamente' : 'vinculada';
+        appendAndEmitLog(
+          `🐛 Issue de falha #${issueReport.issueNumber || ''} ${actionLabel} em nlnadialigia/agent-hub: ${issueReport.issueUrl}`,
+          'warn',
+          '🐞 Auto-Issue'
+        );
+      }
+
+      this.gateway.emitStatus(taskId, 'FAILED', {
+        error: error.message,
+        failedStage: currentStage,
+        failureIssueUrl: issueReport.issueUrl,
+        failureIssueNumber: issueReport.issueNumber,
+      });
     }
+  }
+
+  /**
+   * Reexecuta (Tentar Novamente) o mesmo registro de tarefa (Issue #8)
+   */
+  async retryTask(id: string, dto: RetryTaskDto = {}) {
+    const existing = await this.prisma.taskExecution.findUnique({
+      where: { id },
+      include: { repository: true },
+    });
+
+    if (!existing) {
+      throw new Error(`Tarefa ${id} não encontrada para nova tentativa.`);
+    }
+
+    const updated = await this.prisma.taskExecution.update({
+      where: { id },
+      data: {
+        status: 'QUEUED',
+        retryCount: { increment: 1 },
+        errorMessage: null,
+        customInstructions:
+          dto.customInstructions !== undefined ? dto.customInstructions : existing.customInstructions,
+        allowPaidFallback:
+          dto.allowPaidFallback !== undefined ? dto.allowPaidFallback : existing.allowPaidFallback,
+      },
+      include: { repository: true },
+    });
+
+    this.gateway.emitStatus(updated.id, 'QUEUED');
+    this.gateway.emitLog(
+      updated.id,
+      `🔄 Nova tentativa #${updated.retryCount} iniciada para o Card #${updated.cardId} (${updated.cardTitle}).`,
+      'info',
+      '🎯 Tech Lead'
+    );
+
+    this.executeTaskLifecycle(updated.id, {
+      resumeFromCheckpoint: dto.resumeFromCheckpoint,
+    }).catch((err) => {
+      this.logger.error(`Erro ao reexecutar tarefa ${updated.id}: ${err.message}`);
+    });
+
+    return updated;
   }
 
   /**
@@ -417,9 +545,15 @@ ${data.subtasks.map((s, idx) => `${idx + 1}. [x] ${s}`).join('\n')}
   }
 
   async getTask(id: string) {
-    return this.prisma.taskExecution.findUnique({
+    const task = await this.prisma.taskExecution.findUnique({
       where: { id },
       include: { repository: true },
     });
+    if (!task) return null;
+    const pendingFallbackPrompt = this.gateway.getPendingFallbackPrompt(id) || null;
+    return {
+      ...task,
+      pendingFallbackPrompt,
+    };
   }
 }

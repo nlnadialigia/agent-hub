@@ -3,6 +3,7 @@ import axios from 'axios';
 import { GoogleGenAI } from '@google/genai';
 import { PrismaService } from '../prisma/prisma.service';
 import { CredentialsVaultService } from '../vault/credentials-vault.service';
+import { AgentGateway } from '../gateway/agent.gateway';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -14,6 +15,7 @@ export interface CompletionRequest {
   messages: ChatMessage[];
   temperature?: number;
   specialistRole?: string;
+  taskId?: string;
 }
 
 export interface CompletionResponse {
@@ -29,7 +31,8 @@ export class OmniRouteService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly vaultService: CredentialsVaultService
+    private readonly vaultService: CredentialsVaultService,
+    private readonly gateway: AgentGateway
   ) {}
 
   /**
@@ -283,6 +286,7 @@ export class OmniRouteService {
     }
 
     // Tentativa com modelo Fallback via OmniRoute
+    let lastOmniErrorMessage = 'Gateway indisponível ou modelo não configurado no OmniRoute';
     try {
       const fallbackResponse = await axios.post(
         `${omniBaseUrl}/chat/completions`,
@@ -308,31 +312,131 @@ export class OmniRouteService {
         isFallback: true,
       };
     } catch (secondError: any) {
+      const detail = secondError.response?.data?.error?.message || secondError.message;
+      lastOmniErrorMessage = `Falha no OmniRoute (${requestedModel} / ${fallbackModel}): ${detail}`;
       this.logger.error(`Fallback no OmniRoute também falhou: ${secondError.message}.`);
     }
 
-    // Último recurso: Gemini SDK direto com modelo flash ou pro se chave existir
-    if (geminiConfig.apiKey) {
+    // -------------------------------------------------------------------------
+    // CONFIRMAÇÃO HUMANA ANTES DE TROCAR PARA A IA PAGA (ISSUE #8)
+    // -------------------------------------------------------------------------
+    let effectiveGeminiApiKey = geminiConfig.apiKey || process.env.GEMINI_API_KEY || '';
+    let selectedPaidModel = 'gemini-2.5-pro';
+    let isAuthorizedForPaid = false;
+
+    if (request.taskId) {
+      const taskRecord = await this.prisma.taskExecution.findUnique({
+        where: { id: request.taskId },
+      });
+      const previousStatus = taskRecord?.status || 'PENDING_DIAGNOSTIC';
+
+      if (taskRecord?.allowPaidFallback) {
+        isAuthorizedForPaid = true;
+      } else {
+        this.gateway.emitLog(
+          request.taskId,
+          `⚠️ OmniRoute indisponível ou falhou (${lastOmniErrorMessage}). Aguardando sua confirmação para trocar para a IA Paga (Gemini Direto)...`,
+          'warn',
+          '💳 Guardrail de Custo'
+        );
+
+        await this.prisma.taskExecution.update({
+          where: { id: request.taskId },
+          data: { status: 'WAITING_FALLBACK_CONFIRMATION' },
+        });
+
+        const decision = await this.gateway.requestPaidFallbackDecision({
+          taskId: request.taskId,
+          specialistRole: request.specialistRole || 'ORCHESTRATOR',
+          failedPrimaryModel: requestedModel,
+          failedFallbackModel: fallbackModel,
+          omniErrorMessage: lastOmniErrorMessage,
+          suggestedPaidModel: 'gemini-2.5-pro',
+          hasConfiguredPaidKey: Boolean(effectiveGeminiApiKey),
+        });
+
+        // Restaura o status anterior da etapa em andamento
+        const restoredStatus =
+          previousStatus === 'WAITING_FALLBACK_CONFIRMATION'
+            ? request.specialistRole === 'ORCHESTRATOR'
+              ? 'PENDING_DIAGNOSTIC'
+              : 'IMPLEMENTING'
+            : previousStatus;
+
+        await this.prisma.taskExecution.update({
+          where: { id: request.taskId },
+          data: {
+            status: restoredStatus,
+            ...(decision.action === 'APPROVE_TASK' ? { allowPaidFallback: true } : {}),
+          },
+        });
+        this.gateway.emitStatus(request.taskId, restoredStatus);
+
+        if (decision.action === 'DECLINE') {
+          this.gateway.emitLog(
+            request.taskId,
+            'Troca para IA Paga recusada pelo usuário. Encerrando execução sem gerar custos.',
+            'warn',
+            '💳 Guardrail de Custo'
+          );
+          throw new Error(
+            `OmniRoute falhou (${lastOmniErrorMessage}) e a troca para a IA Paga foi recusada pelo usuário.`
+          );
+        }
+
+        if (decision.paidModel) {
+          selectedPaidModel = decision.paidModel;
+        }
+
+        if (decision.apiKeyOverride?.trim()) {
+          effectiveGeminiApiKey = decision.apiKeyOverride.trim();
+          await this.vaultService.saveConnection({
+            category: 'LLM_PROVIDER',
+            providerType: 'GEMINI',
+            name: 'Google Gemini (Pago)',
+            config: { apiKey: effectiveGeminiApiKey },
+            isDefault: true,
+          });
+        }
+
+        isAuthorizedForPaid = true;
+        this.gateway.emitLog(
+          request.taskId,
+          `✅ Troca para IA Paga autorizada (${selectedPaidModel}). Retomando processamento...`,
+          'success',
+          '💳 Guardrail de Custo'
+        );
+      }
+    } else {
+      // Chamada avulsa sem taskId (se houver chave)
+      isAuthorizedForPaid = Boolean(effectiveGeminiApiKey);
+    }
+
+    // Executa na IA Paga (Gemini SDK Direto) após autorização
+    if (isAuthorizedForPaid && effectiveGeminiApiKey) {
       try {
         const lastResortContent = await this.callDirectGemini(
-          geminiConfig.apiKey,
-          'gemini-2.5-flash',
+          effectiveGeminiApiKey,
+          selectedPaidModel,
           request.messages,
           temperature
         );
         return {
           content: lastResortContent,
-          modelUsed: 'gemini-2.5-flash (Emergency Direct Fallback)',
-          provider: 'GEMINI_DIRECT_EMERGENCY',
+          modelUsed: `${selectedPaidModel} (Gemini Pago Autorizado)`,
+          provider: 'GEMINI_DIRECT_AUTHORIZED',
           isFallback: true,
         };
       } catch (lastError: any) {
-        this.logger.error(`Tentativa de emergência falhou: ${lastError.message}`);
+        this.logger.error(`Tentativa na IA Paga (${selectedPaidModel}) falhou: ${lastError.message}`);
+        throw new Error(
+          `OmniRoute falhou e a chamada na IA Paga (${selectedPaidModel}) também retornou erro: ${lastError.message}`
+        );
       }
     }
 
     throw new Error(
-      `Todos os provedores de LLM falharam. Verifique o OmniRoute (:20128) ou as credenciais do Gemini no cofre/env.`
+      `Todos os provedores de LLM falharam (${lastOmniErrorMessage}). Verifique o OmniRoute (:20128) ou cadastre sua GEMINI_API_KEY na aba Configurações & Integrações.`
     );
   }
 

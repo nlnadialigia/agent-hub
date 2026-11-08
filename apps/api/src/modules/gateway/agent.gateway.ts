@@ -13,6 +13,25 @@ export type HumanDecision =
   | { action: 'REJECT' }
   | { action: 'REFINE'; feedback: string };
 
+export type PaidFallbackDecisionAction = 'APPROVE_ONCE' | 'APPROVE_TASK' | 'DECLINE';
+
+export interface PaidFallbackPromptPayload {
+  taskId: string;
+  specialistRole: string;
+  failedPrimaryModel: string;
+  failedFallbackModel: string;
+  omniErrorMessage: string;
+  suggestedPaidModel: string;
+  hasConfiguredPaidKey: boolean;
+}
+
+export interface PaidFallbackDecisionResponse {
+  taskId: string;
+  action: PaidFallbackDecisionAction;
+  paidModel?: string;
+  apiKeyOverride?: string;
+}
+
 @WebSocketGateway({
   cors: {
     origin: '*',
@@ -25,6 +44,8 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly logger = new Logger(AgentGateway.name);
   private decisionResolvers = new Map<string, (decision: HumanDecision) => void>();
+  private paidFallbackResolvers = new Map<string, (decision: PaidFallbackDecisionResponse) => void>();
+  private pendingFallbackPrompts = new Map<string, PaidFallbackPromptPayload>();
 
   handleConnection(client: Socket) {
     this.logger.log(`Cliente conectado via WebSocket: ${client.id}`);
@@ -108,6 +129,50 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (resolver) {
       resolver(payload.decision);
       this.decisionResolvers.delete(payload.taskId);
+    }
+  }
+
+  /**
+   * Solicita confirmação humana antes de trocar para IA Paga quando o OmniRoute falhar
+   */
+  requestPaidFallbackDecision(
+    payload: PaidFallbackPromptPayload,
+    timeoutMs = 600000
+  ): Promise<PaidFallbackDecisionResponse> {
+    return new Promise((resolve) => {
+      this.pendingFallbackPrompts.set(payload.taskId, payload);
+      this.emitStatus(payload.taskId, 'WAITING_FALLBACK_CONFIRMATION', { fallbackPrompt: payload });
+
+      if (this.server) {
+        this.server.emit('task:paid_fallback_required', payload);
+      }
+
+      this.paidFallbackResolvers.set(payload.taskId, resolve);
+
+      // Timeout de segurança (10 minutos)
+      setTimeout(() => {
+        if (this.paidFallbackResolvers.has(payload.taskId)) {
+          this.logger.warn(`Confirmação de fallback pago expirou por timeout para tarefa ${payload.taskId}`);
+          this.paidFallbackResolvers.delete(payload.taskId);
+          this.pendingFallbackPrompts.delete(payload.taskId);
+          resolve({ taskId: payload.taskId, action: 'DECLINE' });
+        }
+      }, timeoutMs);
+    });
+  }
+
+  getPendingFallbackPrompt(taskId: string): PaidFallbackPromptPayload | undefined {
+    return this.pendingFallbackPrompts.get(taskId);
+  }
+
+  @SubscribeMessage('task:respond_paid_fallback')
+  handlePaidFallbackResponse(client: Socket, payload: PaidFallbackDecisionResponse) {
+    this.logger.log(`Resposta de fallback para IA Paga recebida para ${payload.taskId}: ${payload.action}`);
+    const resolver = this.paidFallbackResolvers.get(payload.taskId);
+    if (resolver) {
+      this.paidFallbackResolvers.delete(payload.taskId);
+      this.pendingFallbackPrompts.delete(payload.taskId);
+      resolver(payload);
     }
   }
 }

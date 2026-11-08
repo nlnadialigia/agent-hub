@@ -166,7 +166,14 @@ export default function App() {
 
         {activeTab === 'repos' && <RepositoriesTab />}
 
-        {activeTab === 'history' && <HistoryTab />}
+        {activeTab === 'history' && (
+          <HistoryTab
+            onNavigateToExecution={(taskId) => {
+              setSelectedTaskId(taskId);
+              setActiveTab('execution');
+            }}
+          />
+        )}
 
         {activeTab === 'settings' && <SettingsIntegrationsTab />}
       </main>

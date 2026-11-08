@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Patch, Param, Body, Query } from '@nestjs/common';
-import { SquadRunnerService, CreateTaskDto } from './squad-runner.service';
+import { SquadRunnerService, CreateTaskDto, RetryTaskDto } from './squad-runner.service';
 
 @Controller('squad/tasks')
 export class SquadController {
@@ -8,6 +8,11 @@ export class SquadController {
   @Post()
   async createTask(@Body() body: CreateTaskDto) {
     return this.squadRunner.createTask(body);
+  }
+
+  @Post(':id/retry')
+  async retryTask(@Param('id') id: string, @Body() body: RetryTaskDto) {
+    return this.squadRunner.retryTask(id, body);
   }
 
   @Get()
