@@ -51,51 +51,30 @@ export class PolyglotScannerService {
       ? raw.replace(/^~/, '/home/nlnadialigia')
       : raw;
 
-    // 2. Se HOST_REPOS_PATH estiver configurado (ex: /home/nlnadialigia/suzano)
+    // Prioridade 1: Testar o caminho diretamente (caso já exista no container exatamente onde apontado)
+    candidates.push(path.resolve(expanded));
+
+    // Prioridade 2: Se HOST_REPOS_PATH estiver configurado e o usuário forneceu um caminho sob ele
     if (hostReposPath) {
       const cleanHost = path.resolve(hostReposPath);
       const cleanTarget = path.resolve(expanded);
 
       if (cleanTarget === cleanHost) {
-        // O usuário apontou exatamente para o diretório raiz do host montado
+        // O usuário apontou exatamente para a raiz configurada em HOST_REPOS_PATH
         candidates.push(reposBase);
-        candidates.push('/home/nlnadialigia');
       } else if (cleanTarget.startsWith(cleanHost + path.sep)) {
-        // O usuário apontou para um subdiretório dentro do HOST_REPOS_PATH
+        // O usuário apontou para um subdiretório dentro de HOST_REPOS_PATH
         const sub = path.relative(cleanHost, cleanTarget);
         candidates.push(path.join(reposBase, sub));
-        candidates.push(path.join('/home/nlnadialigia', sub));
       }
     }
 
-    // 3. Heurística inteligente caso HOST_REPOS_PATH ainda não esteja propagado no container:
-    // Se o usuário passou /home/nlnadialigia/<pasta_raiz_montada>[/<subpasta>]
-    if (expanded.startsWith('/home/nlnadialigia/')) {
-      const afterHome = expanded.substring('/home/nlnadialigia/'.length);
-      const segments = afterHome.split(path.sep).filter(Boolean);
-
-      if (segments.length === 1) {
-        // Ex: /home/nlnadialigia/suzano -> o próprio reposBase
-        candidates.push(reposBase);
-        candidates.push('/home/nlnadialigia');
-      } else if (segments.length > 1) {
-        // Ex: /home/nlnadialigia/suzano/portal-florestal-backend -> subpasta dentro do reposBase
-        const sub = segments.slice(1).join(path.sep);
-        candidates.push(path.join(reposBase, sub));
-        candidates.push(path.join('/home/nlnadialigia', sub));
-      }
-    }
-
-    // 4. Testar o caminho diretamente (caso já seja um caminho absoluto válido do container)
-    candidates.push(path.resolve(expanded));
-
-    // 5. Testar relativo ao reposBase e /home/nlnadialigia
+    // Prioridade 3: Caminhos relativos à raiz de repositórios (/workspace/repos)
     const strippedLeadingSlash = expanded.replace(/^\/+/, '');
     candidates.push(path.join(reposBase, expanded));
     candidates.push(path.join(reposBase, strippedLeadingSlash));
-    candidates.push(path.join('/home/nlnadialigia', strippedLeadingSlash));
 
-    // 6. Percorrer os candidatos e retornar o primeiro que existir no filesystem
+    // 4. Percorrer os candidatos em ordem e retornar o primeiro que realmente existir no filesystem
     for (const candidate of candidates) {
       if (await fs.pathExists(candidate)) {
         this.logger.log(`📍 [Path Resolver] '${raw}' resolvido com sucesso para '${candidate}'`);
