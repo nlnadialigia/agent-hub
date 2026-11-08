@@ -19,6 +19,7 @@ export class OrchestratorAgent {
    * Incorpora a técnica Grill-Me para mapeamento de decisões
    */
   async generateDiagnostic(params: {
+    taskId?: string;
     cardId: string;
     cardTitle: string;
     cardDescription: string;
@@ -94,6 +95,7 @@ Incorpore rigorosamente o feedback acima mantendo o foco em texto explicativo e 
     ];
 
     const response = await this.omniService.generateCompletion({
+      taskId: params.taskId,
       specialistRole: 'ORCHESTRATOR',
       messages,
       temperature: 0.2,

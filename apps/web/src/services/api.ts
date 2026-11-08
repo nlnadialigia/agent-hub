@@ -59,6 +59,17 @@ export const AgentHubApi = {
     const res = await api.get(`/squad/tasks/${id}`);
     return res.data;
   },
+  retryTask: async (
+    id: string,
+    payload?: {
+      customInstructions?: string;
+      resumeFromCheckpoint?: boolean;
+      allowPaidFallback?: boolean;
+    }
+  ) => {
+    const res = await api.post(`/squad/tasks/${id}/retry`, payload || {});
+    return res.data;
+  },
   archiveTask: async (id: string) => {
     const res = await api.patch(`/squad/tasks/${id}/archive`);
     return res.data;

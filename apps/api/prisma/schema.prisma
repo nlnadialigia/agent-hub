@@ -119,6 +119,12 @@ model TaskExecution {
   worktreePath       String?
   pullRequestUrl     String?
   executionLogs      Json?
+  errorMessage       String?           @db.Text // Última mensagem de erro detalhada
+  failedStage        String?                    // Ex: "DIAGNOSTIC" | "IMPLEMENTATION" | "PR_CREATION"
+  retryCount         Int               @default(0)
+  allowPaidFallback  Boolean           @default(false)
+  failureIssueUrl    String?                    // URL da issue automática criada no agent-hub
+  failureIssueNumber Int?                       // Número da issue automática criada no agent-hub
   isArchived         Boolean           @default(false)
   
   createdAt          DateTime          @default(now())
@@ -134,6 +140,7 @@ enum TaskStatus {
   QUEUED
   PENDING_DIAGNOSTIC
   WAITING_APPROVAL
+  WAITING_FALLBACK_CONFIRMATION
   IMPLEMENTING
   RUNNING_TESTS
   SELF_HEALING

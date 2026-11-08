@@ -5,6 +5,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 
 export interface SpecialistExecutionInput {
+  taskId?: string;
   role: string;
   badge: string;
   worktreePath: string;
@@ -33,7 +34,7 @@ export class SpecialistAgentsService {
    * Executa a etapa do Especialista escalado
    */
   async executeSpecialist(input: SpecialistExecutionInput): Promise<SpecialistExecutionResult> {
-    const { role, badge, worktreePath, cardTitle, diagnosticPlan, repoProfile, emitLog } = input;
+    const { taskId, role, badge, worktreePath, cardTitle, diagnosticPlan, repoProfile, emitLog } = input;
 
     emitLog(`Iniciando atuação na sandbox isolada...`, 'info');
 
@@ -69,6 +70,7 @@ INSTRUÇÕES OBRIGATÓRIAS:
 
     try {
       const response = await this.omniService.generateCompletion({
+        taskId,
         specialistRole: role,
         messages,
         temperature: 0.1,
@@ -81,7 +83,7 @@ INSTRUÇÕES OBRIGATÓRIAS:
 
       // Tratamento especial para QA & DevOps: Executar Testes & Self-Healing
       if (role === 'QA_DEVOPS') {
-        const testSuccess = await this.runQASelfHealingLoop(worktreePath, repoProfile, emitLog);
+        const testSuccess = await this.runQASelfHealingLoop(worktreePath, repoProfile, emitLog, taskId);
         return {
           role,
           badge,
@@ -147,7 +149,8 @@ INSTRUÇÕES OBRIGATÓRIAS:
   private async runQASelfHealingLoop(
     worktreePath: string,
     repoProfile: any,
-    emitLog: (msg: string, type?: any) => void
+    emitLog: (msg: string, type?: any) => void,
+    taskId?: string
   ): Promise<boolean> {
     emitLog(`Iniciando bateria de validação e testes automatizados...`, 'info');
 
@@ -190,6 +193,7 @@ Analise a causa raiz da quebra e forneça a correção do código no formato:
 `;
         try {
           const healResponse = await this.omniService.generateCompletion({
+            taskId,
             specialistRole: 'QA_DEVOPS',
             messages: [{ role: 'user', content: healingPrompt }],
             temperature: 0.1,
