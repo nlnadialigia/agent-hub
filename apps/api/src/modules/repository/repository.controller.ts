@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Query, Param } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param } from '@nestjs/common';
 import { PolyglotScannerService } from './polyglot-scanner.service';
 
 @Controller('repositories')
@@ -8,6 +8,21 @@ export class RepositoryController {
   @Get()
   async listRepositories() {
     return this.scannerService.listRepositories();
+  }
+
+  @Get('directories')
+  async listMonitoredDirectories() {
+    return this.scannerService.listMonitoredDirectories();
+  }
+
+  @Post('directories/:id/rescan')
+  async rescanMonitoredDirectory(@Param('id') id: string) {
+    return this.scannerService.rescanMonitoredDirectory(id);
+  }
+
+  @Delete('directories/:id')
+  async deleteMonitoredDirectory(@Param('id') id: string) {
+    return this.scannerService.deleteMonitoredDirectory(id);
   }
 
   @Post('scan')

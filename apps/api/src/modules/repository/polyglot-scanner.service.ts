@@ -90,7 +90,12 @@ export class PolyglotScannerService {
   /**
    * Escaneia e constrói o perfil poliglota completo de um repositório
    */
-  async scanRepository(repoPath: string, repoName?: string, forceScan = false): Promise<PolyglotProfileResult> {
+  async scanRepository(
+    repoPath: string,
+    repoName?: string,
+    forceScan = false,
+    monitoredDirectoryId?: string
+  ): Promise<PolyglotProfileResult> {
     const resolvedPath = await this.resolvePath(repoPath);
 
     const inferredName = repoName || path.basename(resolvedPath);
@@ -304,6 +309,7 @@ export class PolyglotScannerService {
         testFrameworks: Array.from(testFrameworks),
         directoryLayout: layout,
         codingStandards: { strictNullChecks: true, formatOnSave: true },
+        ...(monitoredDirectoryId ? { monitoredDirectoryId } : {}),
       },
       create: {
         name: inferredName,
@@ -322,6 +328,7 @@ export class PolyglotScannerService {
         testFrameworks: Array.from(testFrameworks),
         directoryLayout: layout,
         codingStandards: { strictNullChecks: true, formatOnSave: true },
+        monitoredDirectoryId,
       },
     });
 
@@ -354,6 +361,7 @@ export class PolyglotScannerService {
     return this.prisma.repositoryProfile.findMany({
       orderBy: { updatedAt: 'desc' },
       include: {
+        monitoredDirectory: true,
         tasks: {
           take: 5,
           orderBy: { createdAt: 'desc' },
@@ -361,6 +369,43 @@ export class PolyglotScannerService {
         },
       },
     });
+  }
+
+  /**
+   * Lista todas as pastas monitoradas com seus repositórios
+   */
+  async listMonitoredDirectories() {
+    return this.prisma.monitoredDirectory.findMany({
+      orderBy: { name: 'asc' },
+      include: {
+        repositories: {
+          select: {
+            id: true,
+            name: true,
+            primaryLanguage: true,
+            detectedVcs: true,
+            targetBranch: true,
+            lastAnalyzedAt: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Re-escaneia uma pasta monitorada pelo ID
+   */
+  async rescanMonitoredDirectory(id: string) {
+    const dir = await this.prisma.monitoredDirectory.findUnique({ where: { id } });
+    if (!dir) throw new Error('Pasta monitorada não encontrada.');
+    return this.scanDirectory(dir.path);
+  }
+
+  /**
+   * Remove uma pasta monitorada do banco (mantém os repositórios desvinculados)
+   */
+  async deleteMonitoredDirectory(id: string) {
+    return this.prisma.monitoredDirectory.delete({ where: { id } });
   }
 
   /**
@@ -378,6 +423,21 @@ export class PolyglotScannerService {
    */
   async scanDirectory(parentPath: string): Promise<{ parentPath: string; scannedCount: number; repositories: PolyglotProfileResult[] }> {
     const resolvedParent = await this.resolvePath(parentPath);
+    const dirName = path.basename(resolvedParent) || resolvedParent;
+
+    // Registra ou atualiza a pasta monitorada no banco
+    const monitoredDir = await this.prisma.monitoredDirectory.upsert({
+      where: { path: resolvedParent },
+      update: {
+        name: dirName,
+        lastScannedAt: new Date(),
+      },
+      create: {
+        path: resolvedParent,
+        name: dirName,
+        lastScannedAt: new Date(),
+      },
+    });
 
     this.logger.log(`📂 [Batch Scanner] Buscando repositórios dentro de '${resolvedParent}'...`);
     const entries = await fs.readdir(resolvedParent, { withFileTypes: true });
@@ -394,7 +454,7 @@ export class PolyglotScannerService {
         if (hasGit || hasManifest) {
           try {
             this.logger.log(`🔍 [Batch Scanner] Encontrado repositório em '${entry.name}'. Escaneando...`);
-            const result = await this.scanRepository(fullSubPath, entry.name, true);
+            const result = await this.scanRepository(fullSubPath, entry.name, true, monitoredDir.id);
             scannedRepos.push(result);
           } catch (err: any) {
             this.logger.warn(`Erro ao escanear subpasta '${entry.name}': ${err.message}`);
@@ -402,6 +462,12 @@ export class PolyglotScannerService {
         }
       }
     }
+
+    // Atualiza a contagem consolidada de repositórios na pasta monitorada
+    await this.prisma.monitoredDirectory.update({
+      where: { id: monitoredDir.id },
+      data: { scannedReposCount: scannedRepos.length },
+    });
 
     return {
       parentPath: resolvedParent,

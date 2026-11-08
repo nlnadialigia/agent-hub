@@ -1,16 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   FolderGit2,
-  GitBranch,
   RefreshCw,
   Plus,
   Check,
-  Code2,
-  Server,
-  Layers,
-  FileCheck,
   FolderOpen,
   FolderSearch,
+  FolderSync,
+  Trash2,
+  Filter,
 } from 'lucide-react';
 import { AgentHubApi } from '../../services/api';
 import { Button } from '../ui/button';
@@ -19,7 +17,10 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui
 
 export const RepositoriesTab: React.FC = () => {
   const [repositories, setRepositories] = useState<any[]>([]);
+  const [monitoredDirectories, setMonitoredDirectories] = useState<any[]>([]);
+  const [selectedDirectoryId, setSelectedDirectoryId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [rescanningDirId, setRescanningDirId] = useState<string | null>(null);
   const [showScanForm, setShowScanForm] = useState(false);
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [scanPath, setScanPath] = useState('');
@@ -28,14 +29,18 @@ export const RepositoriesTab: React.FC = () => {
   const [savedTargetBranchId, setSavedTargetBranchId] = useState<string | null>(null);
 
   useEffect(() => {
-    loadRepositories();
+    loadData();
   }, []);
 
-  const loadRepositories = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const data = await AgentHubApi.getRepositories();
-      setRepositories(data);
+      const [repos, dirs] = await Promise.all([
+        AgentHubApi.getRepositories(),
+        AgentHubApi.getMonitoredDirectories(),
+      ]);
+      setRepositories(repos);
+      setMonitoredDirectories(dirs);
     } catch {
       // Falha silenciosa
     } finally {
@@ -53,7 +58,7 @@ export const RepositoriesTab: React.FC = () => {
       setScanPath('');
       setScanName('');
       setShowScanForm(false);
-      await loadRepositories();
+      await loadData();
     } catch (err: any) {
       alert(`Erro ao escanear repositório: ${err.message}`);
     } finally {
@@ -70,11 +75,35 @@ export const RepositoriesTab: React.FC = () => {
       const res = await AgentHubApi.scanDirectory(batchPath.trim());
       alert(`Varredura concluída! ${res.scannedCount} repositório(s) descobertos e importados da pasta.`);
       setShowBatchForm(false);
-      await loadRepositories();
+      await loadData();
     } catch (err: any) {
       alert(`Erro ao escanear pasta de repositórios: ${err.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRescanDirectory = async (dirId: string) => {
+    setRescanningDirId(dirId);
+    try {
+      const res = await AgentHubApi.rescanMonitoredDirectory(dirId);
+      alert(`Re-escaneamento concluído! ${res.scannedCount} repositório(s) atualizados.`);
+      await loadData();
+    } catch (err: any) {
+      alert(`Erro ao re-escanear pasta: ${err.message}`);
+    } finally {
+      setRescanningDirId(null);
+    }
+  };
+
+  const handleDeleteDirectory = async (dirId: string, dirName: string) => {
+    if (!confirm(`Deseja remover a pasta monitorada '${dirName}'? Os repositórios já escaneados serão preservados no catálogo.`)) return;
+    try {
+      await AgentHubApi.deleteMonitoredDirectory(dirId);
+      if (selectedDirectoryId === dirId) setSelectedDirectoryId(null);
+      await loadData();
+    } catch (err: any) {
+      alert(`Erro ao remover pasta: ${err.message}`);
     }
   };
 
@@ -83,11 +112,15 @@ export const RepositoriesTab: React.FC = () => {
       await AgentHubApi.updateTargetBranch(repoId, targetBranch);
       setSavedTargetBranchId(repoId);
       setTimeout(() => setSavedTargetBranchId(null), 2000);
-      await loadRepositories();
+      await loadData();
     } catch (err: any) {
       alert(`Erro ao atualizar branch: ${err.message}`);
     }
   };
+
+  const filteredRepositories = selectedDirectoryId
+    ? repositories.filter((r) => r.monitoredDirectoryId === selectedDirectoryId)
+    : repositories;
 
   return (
     <div className="space-y-6">
@@ -102,13 +135,13 @@ export const RepositoriesTab: React.FC = () => {
               Repositórios & Perfis Poliglotas
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Mapeamento de stacks (Node, Python, React, Prisma) e branch alvo para PRs.
+              Pastas monitoradas, mapeamento de stacks (Node, Python, React, Prisma) e branch alvo para PRs.
             </p>
           </div>
         </div>
 
         <div className="flex items-center space-x-3">
-          <Button variant="outline" size="sm" onClick={loadRepositories} disabled={loading}>
+          <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
             <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
@@ -140,6 +173,103 @@ export const RepositoriesTab: React.FC = () => {
         </div>
       </div>
 
+      {/* Seção de Pastas-Raiz Monitoradas */}
+      {monitoredDirectories.length > 0 && (
+        <Card className="border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-sm font-semibold text-slate-800 dark:text-slate-200 flex items-center space-x-2">
+                  <FolderSync className="w-4 h-4 text-cyan-500" />
+                  <span>Pastas Monitoradas no Banco</span>
+                  <Badge variant="cyan" className="ml-2 text-[11px]">
+                    {monitoredDirectories.length} {monitoredDirectories.length === 1 ? 'pasta cadastrada' : 'pastas cadastradas'}
+                  </Badge>
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Pastas-raiz salvas. Clique em Re-escanear para atualizar os repositórios em 1 clique ou clique na pasta para filtrar a listagem abaixo.
+                </CardDescription>
+              </div>
+
+              {selectedDirectoryId && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSelectedDirectoryId(null)}
+                  className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                >
+                  <Filter className="w-3.5 h-3.5 mr-1" />
+                  Limpar Filtro ({repositories.length} totais)
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+
+          <CardContent className="pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {monitoredDirectories.map((dir) => {
+                const isSelected = selectedDirectoryId === dir.id;
+                const isRescanning = rescanningDirId === dir.id;
+                return (
+                  <div
+                    key={dir.id}
+                    onClick={() => setSelectedDirectoryId(isSelected ? null : dir.id)}
+                    className={`p-3.5 rounded-xl border transition cursor-pointer flex flex-col justify-between ${
+                      isSelected
+                        ? 'border-cyan-500 bg-cyan-50/50 dark:bg-cyan-950/40 shadow-sm'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-cyan-400/50'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="font-semibold text-sm text-slate-900 dark:text-slate-100 flex items-center space-x-1.5">
+                          <FolderOpen className="w-4 h-4 text-cyan-500" />
+                          <span>{dir.name}</span>
+                        </span>
+                        <Badge variant={isSelected ? 'cyan' : 'secondary'} className="text-[10px]">
+                          {dir.scannedReposCount || dir.repositories?.length || 0} repos
+                        </Badge>
+                      </div>
+                      <p className="text-xs font-mono text-slate-500 dark:text-slate-400 truncate" title={dir.path}>
+                        {dir.path}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Última varredura: {new Date(dir.lastScannedAt).toLocaleDateString('pt-BR')} às{' '}
+                        {new Date(dir.lastScannedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-end space-x-2 mt-3 pt-2 border-t border-slate-100 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs border-cyan-500/30 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/40"
+                        disabled={isRescanning || loading}
+                        onClick={() => handleRescanDirectory(dir.id)}
+                        title="Re-escanear esta pasta agora"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 mr-1 ${isRescanning ? 'animate-spin' : ''}`} />
+                        {isRescanning ? 'Varrendo...' : 'Re-escanear'}
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                        onClick={() => handleDeleteDirectory(dir.id, dir.name)}
+                        title="Remover pasta monitorada"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Formulário de Escaneamento em Lote */}
       {showBatchForm && (
         <Card className="border-cyan-500/40 bg-cyan-50/10 dark:bg-cyan-950/20 shadow-md">
@@ -149,7 +279,7 @@ export const RepositoriesTab: React.FC = () => {
               <span>Escanear Pasta Completa & Importar Múltiplos Repositórios</span>
             </CardTitle>
             <CardDescription>
-              Informe um diretório pai (ex: <code>/home/nlnadialigia</code> ou <code>/home/nlnadialigia/projetos</code>). O sistema varrerá as subpastas e importará todos os projetos com Git automaticamente.
+              Informe um diretório pai (ex: <code>/home/nlnadialigia/suzano</code> ou <code>/home/nlnadialigia/www</code>). A pasta será salva no banco como pasta monitorada para re-varreduras rápidas.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -161,7 +291,7 @@ export const RepositoriesTab: React.FC = () => {
                   required
                   value={batchPath}
                   onChange={(e) => setBatchPath(e.target.value)}
-                  placeholder="Ex: /home/nlnadialigia"
+                  placeholder="Ex: /home/nlnadialigia/suzano ou /home/nlnadialigia/www"
                   className="w-full px-3.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono focus:ring-2 focus:ring-cyan-500 focus:outline-none"
                 />
               </div>
@@ -171,7 +301,7 @@ export const RepositoriesTab: React.FC = () => {
                   Cancelar
                 </Button>
                 <Button type="submit" variant="cyan" size="sm" disabled={loading || !batchPath.trim()}>
-                  {loading ? 'Varrendo Subpastas...' : 'Iniciar Varredura em Lote'}
+                  {loading ? 'Varrendo Subpastas...' : 'Iniciar Varredura & Salvar Pasta'}
                 </Button>
               </div>
             </form>
@@ -200,7 +330,7 @@ export const RepositoriesTab: React.FC = () => {
                     required
                     value={scanPath}
                     onChange={(e) => setScanPath(e.target.value)}
-                    placeholder="Ex: /home/usuario/meu-projeto ou ../meu-projeto"
+                    placeholder="Ex: /home/nlnadialigia/suzano/portal-florestal-backend"
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-cyan-500 focus:outline-none"
                   />
                 </div>
@@ -231,15 +361,17 @@ export const RepositoriesTab: React.FC = () => {
       )}
 
       {/* Grid de Repositórios */}
-      {repositories.length === 0 ? (
+      {filteredRepositories.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-slate-400 text-sm">
-            Nenhum repositório escaneado ainda. Clique em "Escanear Repositório" para mapear seu projeto.
+            {selectedDirectoryId
+              ? 'Nenhum repositório encontrado para esta pasta monitorada selecionada.'
+              : 'Nenhum repositório escaneado ainda. Clique em "Escanear Pasta (Lote)" ou "Escanear Repositório".'}
           </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {repositories.map((repo) => (
+          {filteredRepositories.map((repo) => (
             <Card key={repo.id} className="border-slate-200 dark:border-slate-800 hover:border-cyan-500/40 transition">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
@@ -247,6 +379,11 @@ export const RepositoriesTab: React.FC = () => {
                     <CardTitle className="text-lg text-slate-900 dark:text-slate-100 flex items-center space-x-2">
                       <span>{repo.name}</span>
                       <Badge variant="cyan">{repo.primaryLanguage}</Badge>
+                      {repo.monitoredDirectory?.name && (
+                        <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          📁 {repo.monitoredDirectory.name}
+                        </span>
+                      )}
                     </CardTitle>
                     <p className="text-xs text-slate-400 font-mono break-all">{repo.localPath}</p>
                   </div>
