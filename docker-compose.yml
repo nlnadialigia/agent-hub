@@ -75,7 +75,7 @@ services:
       WORKTREES_BASE_DIR: /workspace/worktrees
       HOST_REPOS_PATH: ${HOST_REPOS_PATH:-/home/nlnadialigia}
     volumes:
-      - ${HOST_REPOS_PATH:-/home/nlnadialigia}:/home/nlnadialigia
+      - ${HOST_HOME:-/home/nlnadialigia}:/home/nlnadialigia
       - ${HOST_REPOS_PATH:-/home/nlnadialigia}:/workspace/repos
       - agent_hub_worktrees:/workspace/worktrees
       - ~/.gitconfig:/root/.gitconfig:ro
